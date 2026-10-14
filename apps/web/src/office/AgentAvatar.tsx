@@ -33,7 +33,7 @@ export function AgentAvatar({
   const leftFoot = useRef<THREE.Group>(null);
   const rightFoot = useRef<THREE.Group>(null);
   const offline = agent.status === "offline";
-  const isRelaxing = relaxing && agent.status === "idle";
+  const isRelaxing = relaxing && (agent.status === "idle" || agent.status === "completed");
   const isWorking = agent.status === "working";
   const activity = getOfficeActivity(agent);
   const idleVariant = loungeVariant ?? loungePersonality(agent.id).variant;

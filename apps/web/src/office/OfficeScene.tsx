@@ -18,6 +18,7 @@ import { loungePersonality } from "./lounge-animation.js";
 import { officeViews, type OfficeView } from "./camera-views.js";
 import { useOfficeStore } from "../store.js";
 import { agentDisplayName } from "../agent-name.js";
+import { belongsInLounge } from "./lounge-eligibility.js";
 
 const defaultZoom = 50;
 
@@ -53,6 +54,20 @@ function Scene({
   view: OfficeView;
 }) {
   const controls = useRef<OrbitControlsImpl>(null);
+  const [loungeNow, setLoungeNow] = useState(Date.now);
+  useEffect(() => {
+    const update = () => {
+      const now = Date.now();
+      setLoungeNow((previous) =>
+        allAgents.some((agent) => belongsInLounge(agent, previous) !== belongsInLounge(agent, now))
+          ? now
+          : previous,
+      );
+    };
+    update();
+    const timer = window.setInterval(update, 250);
+    return () => window.clearInterval(timer);
+  }, [allAgents]);
   const loungeAssignments = useRef(new Map<string, number>());
   const waterClock = useRef(0);
   const waterState = useRef<WaterBreakState>({ visit: null, nextAt: null, variants: {} });
@@ -98,7 +113,7 @@ function Scene({
   const byDesk = useMemo(() => new Map(layout.desks.map((desk) => [desk.agentId, desk])), [layout]);
   const selectedDesk = selectedId ? byDesk.get(selectedId) : undefined;
   const loungeIndexByAgent = useMemo(() => {
-    const idleAgents = allAgents.filter((agent) => agent.status === "idle");
+    const idleAgents = allAgents.filter((agent) => belongsInLounge(agent, loungeNow));
     const idleIds = new Set(idleAgents.map((agent) => agent.id));
     const assignments = new Map([...loungeAssignments.current].filter(([id]) => idleIds.has(id)));
     const occupiedSeats = new Set(assignments.values());
@@ -122,7 +137,7 @@ function Scene({
     }
     loungeAssignments.current = assignments;
     return assignments;
-  }, [allAgents, byDesk]);
+  }, [allAgents, byDesk, loungeNow]);
   const selectedLoungeIndex = selectedId ? loungeIndexByAgent.get(selectedId) : undefined;
   const fullIdleSeats = useMemo(
     () =>
