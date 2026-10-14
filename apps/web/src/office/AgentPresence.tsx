@@ -34,7 +34,8 @@ export function AgentPresence({
 }) {
   const root = useRef<THREE.Group>(null);
   const initialized = useRef(false);
-  const atLounge = agent.status === "idle" && loungeIndex !== undefined;
+  const atLounge =
+    (agent.status === "idle" || agent.status === "completed") && loungeIndex !== undefined;
   const visit = atLounge && !reducedMotion ? waterVisit : null;
   const isRelaxing = atLounge && !visit;
   const seat = atLounge ? livingRoomSeat(loungeIndex) : null;

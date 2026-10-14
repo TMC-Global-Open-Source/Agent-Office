@@ -131,6 +131,9 @@ The **Show agent source** setting hides or shows CLI/VS Code prefixes in agent n
 throughout the dashboard and floor; it is remembered in this browser. Agents needing
 attention wave one raised arm (a static raised arm with reduced motion).
 Completion plays a 12-second cheer, celebratory sway, and farewell wave before settling.
+After the celebration, completed agents relax on the couch while retaining their
+Completed status and history. Sessions already completed when the dashboard opens
+go directly to the lounge if their celebration period has elapsed.
 Attention uses a repeating 8-second wave-and-scan sequence until its status changes.
 Neither animation extends the configured waiting/idle timeout or blocks new work.
 Watching-task agents have an animated monitor activity indicator (decorative, not measured
