@@ -1,5 +1,4 @@
 import { memo } from "react";
-import { Text } from "@react-three/drei";
 
 const sofaColors = ["#668b82", "#8296a0"];
 const seatOffsets = [-1.29, -0.43, 0.43, 1.29];
@@ -70,19 +69,6 @@ export const LivingRoom = memo(function LivingRoom({ seatCount }: { seatCount: n
             <cylinderGeometry args={[0.11, 0.13, 0.18, 12]} />
             <meshStandardMaterial color="#eee1cb" />
           </mesh>
-          <mesh position={[0, 1.52, -2.22]}>
-            <boxGeometry args={[3.4, 0.78, 0.1]} />
-            <meshStandardMaterial color="#d9d1c1" roughness={1} />
-          </mesh>
-          <Text
-            position={[0, 1.52, -2.155]}
-            fontSize={0.22}
-            color="#526c67"
-            anchorX="center"
-            anchorY="middle"
-          >
-            LIVING ROOM
-          </Text>
         </group>
       ))}
     </>

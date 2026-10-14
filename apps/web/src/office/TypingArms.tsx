@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { OfficeActivity } from "@agent-office/shared";
 import { activityPose } from "./activity-animation.js";
+import { coffeeSip } from "./desk-animation.js";
 
 function TypingArm({
   side,
@@ -18,6 +19,7 @@ function TypingArm({
   const upper = useRef<THREE.Mesh>(null);
   const lower = useRef<THREE.Mesh>(null);
   const hand = useRef<THREE.Group>(null);
+  const cup = useRef<THREE.Group>(null);
   const vectors = useRef({
     shoulder: new THREE.Vector3(side * 0.24, 1.12, 0),
     elbow: new THREE.Vector3(side * 0.25, 0.79, 0.13),
@@ -41,6 +43,12 @@ function TypingArm({
     segment(upper.current, shoulder, elbow);
     segment(lower.current, elbow, wrist);
     hand.current?.position.copy(wrist);
+    if (cup.current) {
+      const sip = coffeeSip(id, clock.elapsedTime, reducedMotion);
+      cup.current.visible =
+        sip > 0 && ["working", "typing", "reading", "researching", "monitoring"].includes(activity);
+      cup.current.rotation.x = -sip * 0.35;
+    }
   });
   return (
     <>
@@ -53,6 +61,22 @@ function TypingArm({
         <meshStandardMaterial color="#526b72" roughness={0.88} />
       </mesh>
       <group ref={hand}>
+        {side > 0 && (
+          <group ref={cup} position={[0, 0.04, 0.05]} visible={false}>
+            <mesh>
+              <cylinderGeometry args={[0.07, 0.06, 0.13, 10]} />
+              <meshStandardMaterial color="#f0d1ac" />
+            </mesh>
+            <mesh position={[0, 0.066, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <circleGeometry args={[0.055, 10]} />
+              <meshStandardMaterial color="#775a45" side={THREE.DoubleSide} />
+            </mesh>
+            <mesh position={[0.075, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+              <torusGeometry args={[0.035, 0.012, 6, 10]} />
+              <meshStandardMaterial color="#f0d1ac" />
+            </mesh>
+          </group>
+        )}
         <mesh castShadow>
           <boxGeometry args={[0.1, 0.035, 0.12]} />
           <meshStandardMaterial color="#e5bd97" roughness={0.9} />

@@ -319,6 +319,16 @@ h1 {
 .scene-controls .icon-button {
   background: #fffffff2;
 }
+.office-view-select {
+  max-width: 120px;
+  padding: 8px;
+  border: 1px solid var(--cp-border);
+  border-radius: 0.625rem;
+  background: var(--cp-surface);
+  color: var(--cp-text);
+  font: inherit;
+  font-size: 12px;
+}
 .scene-caption {
   display: flex;
   justify-content: space-between;

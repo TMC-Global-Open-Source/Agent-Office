@@ -1,6 +1,6 @@
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Text } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { MutableRefObject } from "react";
 import type { Agent } from "@agent-office/shared";
@@ -15,6 +15,9 @@ import { SubagentTeams } from "./SubagentTeams.js";
 import { WaterCooler } from "./WaterCooler.js";
 import { advanceWaterBreak, coolerStandingPosition, type WaterBreakState } from "./water-cooler.js";
 import { loungePersonality } from "./lounge-animation.js";
+import { officeViews, type OfficeView } from "./camera-views.js";
+import { useOfficeStore } from "../store.js";
+import { agentDisplayName } from "../agent-name.js";
 
 const defaultZoom = 50;
 
@@ -32,6 +35,7 @@ function Scene({
   reducedMotion,
   resetRef,
   zoomRef,
+  view,
 }: {
   agents: Agent[];
   allAgents: Agent[];
@@ -46,22 +50,50 @@ function Scene({
   reducedMotion: boolean;
   resetRef: MutableRefObject<(() => void) | null>;
   zoomRef: MutableRefObject<((direction: number) => void) | null>;
+  view: OfficeView;
 }) {
   const controls = useRef<OrbitControlsImpl>(null);
   const loungeAssignments = useRef(new Map<string, number>());
   const waterClock = useRef(0);
   const waterState = useRef<WaterBreakState>({ visit: null, nextAt: null, variants: {} });
   const [waterBreak, setWaterBreak] = useState(waterState.current);
+  const saveCamera = () => {
+    const camera = controls.current?.object;
+    if (!controls.current || !(camera instanceof OrthographicCamera)) return;
+    useOfficeStore.getState().setCameraState({
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [controls.current.target.x, controls.current.target.y, controls.current.target.z],
+      zoom: camera.zoom,
+    });
+  };
   resetRef.current = () => {
     if (!controls.current) return;
     controls.current.target.set(0, 0, 0);
-    controls.current.object.position.set(12, 14, 12);
+    controls.current.object.position.set(...officeViews[view].position);
+    controls.current.object.up.set(...officeViews[view].up);
     if (controls.current.object instanceof OrthographicCamera) {
-      controls.current.object.zoom = defaultZoom;
+      controls.current.object.zoom = officeViews[view].zoom;
       controls.current.object.updateProjectionMatrix();
     }
     controls.current.update();
+    saveCamera();
   };
+  useEffect(() => {
+    const saved = useOfficeStore.getState().cameraState;
+    if (!saved || !controls.current) {
+      resetRef.current?.();
+      return;
+    }
+    const camera = controls.current.object;
+    camera.position.set(...saved.position);
+    camera.up.set(...officeViews[view].up);
+    controls.current.target.set(...saved.target);
+    if (camera instanceof OrthographicCamera) {
+      camera.zoom = saved.zoom;
+      camera.updateProjectionMatrix();
+    }
+    controls.current.update();
+  }, [view, resetRef]);
   const layout = useMemo(() => subagentLayout(allAgents, desks), [allAgents, desks]);
   const byDesk = useMemo(() => new Map(layout.desks.map((desk) => [desk.agentId, desk])), [layout]);
   const selectedDesk = selectedId ? byDesk.get(selectedId) : undefined;
@@ -125,10 +157,12 @@ function Scene({
           ? livingRoomSeat(selectedLoungeIndex)
           : [(selectedDesk!.column - 2) * 3.15, 0, selectedDesk!.row * 3.15];
     const amount = Math.min(1, delta * 1.6);
-    controls.current.target.x += (x - controls.current.target.x) * amount;
-    controls.current.target.z += (z - controls.current.target.z) * amount;
-    camera.position.x += (x + 12 - camera.position.x) * amount;
-    camera.position.z += (z + 12 - camera.position.z) * amount;
+    const dx = (x - controls.current.target.x) * amount;
+    const dz = (z - controls.current.target.z) * amount;
+    controls.current.target.x += dx;
+    controls.current.target.z += dz;
+    camera.position.x += dx;
+    camera.position.z += dz;
     controls.current.update();
   });
   zoomRef.current = (direction) => {
@@ -139,6 +173,7 @@ function Scene({
       camera.updateProjectionMatrix();
     }
     controls.current.update();
+    saveCamera();
   };
   const floorSize = Math.max(
     18,
@@ -176,9 +211,6 @@ function Scene({
             <boxGeometry args={[1.6, 0.75, 0.55]} />
             <meshStandardMaterial color="#9e886f" />
           </mesh>
-          <Text position={[0, 2.3, -8]} fontSize={0.65} color="#81918c" anchorX="center">
-            AGENT OFFICE
-          </Text>
         </>
       )}
       <LivingRoom seatCount={allAgents.length} />
@@ -195,6 +227,7 @@ function Scene({
         if (!desk) return null;
         return (
           <Workstation
+            view={view}
             key={agent.id}
             agent={agent}
             desk={desk}
@@ -225,12 +258,12 @@ function Scene({
         );
       })}
       <OrbitControls
+        onEnd={saveCamera}
         ref={controls}
         makeDefault
         target={[0, 0, 0]}
         enableRotate={false}
         enablePan
-        maxPolarAngle={Math.PI / 2.12}
         minZoom={18}
         maxZoom={100}
         zoomSpeed={0.75}
@@ -240,6 +273,7 @@ function Scene({
 }
 
 export function OfficeScene(props: {
+  view: OfficeView;
   agents: Agent[];
   allAgents: Agent[];
   allIdle: boolean;
@@ -254,6 +288,9 @@ export function OfficeScene(props: {
   resetRef: MutableRefObject<(() => void) | null>;
   zoomRef: MutableRefObject<((direction: number) => void) | null>;
 }) {
+  const showSource = useOfficeStore((state) => state.showAgentSource);
+  const displayAgents = (agents: Agent[]) =>
+    agents.map((agent) => ({ ...agent, displayName: agentDisplayName(agent, showSource) }));
   return (
     <Canvas
       orthographic
@@ -263,7 +300,11 @@ export function OfficeScene(props: {
       gl={{ antialias: !props.performanceMode }}
     >
       <Suspense fallback={null}>
-        <Scene {...props} />
+        <Scene
+          {...props}
+          agents={displayAgents(props.agents)}
+          allAgents={displayAgents(props.allAgents)}
+        />
       </Suspense>
     </Canvas>
   );

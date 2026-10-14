@@ -1,13 +1,32 @@
 import type { OfficeActivity } from "@agent-office/shared";
 import { typingPose } from "./typing-animation.js";
 import { loungePersonality } from "./lounge-animation.js";
+import { coffeeSip } from "./desk-animation.js";
 
 export function activityPose(
   id: string,
   activity: OfficeActivity,
   time: number,
   reducedMotion: boolean,
-) {
+): {
+  left: { x: number; y: number; z: number };
+  right: { x: number; y: number; z: number };
+  headX: number;
+  headY: number;
+} {
+  const sip = coffeeSip(id, time, reducedMotion);
+  if (sip > 0 && ["working", "typing", "reading", "researching", "monitoring"].includes(activity)) {
+    const base = activityPose(id, activity, time, true);
+    return {
+      ...base,
+      right: {
+        x: base.right.x + (0.13 - base.right.x) * sip,
+        y: base.right.y + (1.4 - base.right.y) * sip,
+        z: base.right.z + (0.27 - base.right.z) * sip,
+      },
+      headX: -0.08 * sip,
+    };
+  }
   if (activity === "typing") return { ...typingPose(id, time, reducedMotion), headY: 0 };
   const phase = loungePersonality(id).phase;
   const sway = reducedMotion ? 0 : Math.sin(time * 1.3 + phase);
@@ -33,10 +52,15 @@ export function activityPose(
       pose.right.y += reducedMotion ? 0 : Math.max(0, Math.sin(time * 2 + phase)) * 0.012;
       break;
     case "delegating":
-    case "attention":
       pose.right = { x: 0.43, y: 1.43 + sway * 0.04, z: 0.12 };
       pose.headY = 0.12;
       break;
+    case "attention": {
+      const wave = reducedMotion ? 0 : Math.sin(time * 5 + phase);
+      pose.right = { x: 0.43 + wave * 0.16, y: 1.58 + Math.abs(wave) * 0.06, z: 0.12 };
+      pose.headY = 0.12;
+      break;
+    }
     case "organizing":
       pose.left = { x: -0.24 + sway * 0.04, y: 0.82, z: 0.35 };
       pose.right = { x: 0.24 - sway * 0.04, y: 0.86, z: 0.35 };
