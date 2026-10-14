@@ -1,5 +1,8 @@
 import { memo, useRef } from "react";
-import { Billboard, Text } from "@react-three/drei";
+import { Text } from "@react-three/drei";
+import { OfficeLabel } from "./OfficeLabel.js";
+import type { OfficeView } from "./camera-views.js";
+import { coffeeSip } from "./desk-animation.js";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Agent } from "@agent-office/shared";
@@ -21,6 +24,7 @@ export const Workstation = memo(function Workstation({
   onSelect,
   labels,
   reducedMotion,
+  view,
 }: {
   agent: Agent;
   desk: DeskData;
@@ -28,12 +32,28 @@ export const Workstation = memo(function Workstation({
   onSelect: () => void;
   labels: boolean;
   reducedMotion: boolean;
+  view: OfficeView;
 }) {
   const root = useRef<THREE.Group>(null);
   const glow = useRef<THREE.MeshStandardMaterial>(null);
+  const deskCup = useRef<THREE.Mesh>(null);
+  const taskIndicator = useRef<THREE.Group>(null);
   const x = (desk.column - 2) * 3.15;
   const z = desk.row * 3.15;
+  const sideView = view === "left" || view === "right";
+  const monitoring = agent.status === "working" && getOfficeActivity(agent) === "monitoring";
   useFrame(({ clock }) => {
+    if (deskCup.current)
+      deskCup.current.visible = !(
+        agent.status === "working" &&
+        ["working", "typing", "reading", "researching", "monitoring"].includes(
+          getOfficeActivity(agent),
+        ) &&
+        coffeeSip(agent.id, clock.elapsedTime, reducedMotion) > 0
+      );
+    if (taskIndicator.current) {
+      taskIndicator.current.position.x = reducedMotion ? 0 : Math.sin(clock.elapsedTime * 2) * 0.19;
+    }
     if (root.current && agent.status === "spawning" && !reducedMotion) {
       root.current.position.y = THREE.MathUtils.lerp(root.current.position.y, 0, 0.07);
     }
@@ -84,6 +104,26 @@ export const Workstation = memo(function Workstation({
         <boxGeometry args={[0.34, 0.025, 0.18]} />
         <meshStandardMaterial color="#384b50" />
       </mesh>
+      {monitoring && (
+        <group position={[0, 1.19, -0.17]}>
+          {[0, 1, 2].map((line) => (
+            <mesh key={line} position={[-0.06, 0.1 - line * 0.065, 0]}>
+              <planeGeometry args={[0.34 - line * 0.06, 0.014]} />
+              <meshBasicMaterial color="#a9b7b7" />
+            </mesh>
+          ))}
+          <mesh position={[0, -0.11, 0]}>
+            <planeGeometry args={[0.48, 0.025]} />
+            <meshBasicMaterial color="#263b42" />
+          </mesh>
+          <group ref={taskIndicator} position={[0, -0.11, 0.002]}>
+            <mesh>
+              <planeGeometry args={[0.1, 0.025]} />
+              <meshBasicMaterial color="#e5c982" />
+            </mesh>
+          </group>
+        </group>
+      )}
       {[-0.105, -0.035, 0.035, 0.105].map((keyX) =>
         [-0.04, 0.02, 0.08].map((keyZ) => (
           <mesh key={`${keyX}:${keyZ}`} position={[keyX, 0.886, 0.13 + keyZ]}>
@@ -104,7 +144,7 @@ export const Workstation = memo(function Workstation({
           </mesh>
         </group>
       )}
-      <mesh position={[0.51, 0.92, 0.18]} castShadow>
+      <mesh ref={deskCup} position={[0.51, 0.92, 0.18]} castShadow>
         <cylinderGeometry args={[0.07, 0.08, 0.14, 8]} />
         <meshStandardMaterial color="#f0d1ac" />
       </mesh>
@@ -144,15 +184,15 @@ export const Workstation = memo(function Workstation({
         </mesh>
       </group>
       {labels && (
-        <Billboard position={[0, 2.12, 0]}>
+        <OfficeLabel position={[0, 1.2, 0]} offset={sideView ? 0 : 1} offsetX={sideView ? 1.8 : 0}>
           <Text
             position={[0, 0.18, 0]}
-            fontSize={0.23}
+            fontSize={0.2}
             color="#263c42"
             anchorX="center"
             outlineWidth={0.008}
             outlineColor="#f3eee4"
-            maxWidth={2.8}
+            maxWidth={1.9}
             anchorY="bottom"
             textAlign="center"
           >
@@ -163,7 +203,7 @@ export const Workstation = memo(function Workstation({
             fontSize={0.16}
             color={statusColors[agent.status]}
             anchorX="center"
-            maxWidth={2.8}
+            maxWidth={1.9}
             outlineWidth={0.008}
             outlineColor="#f3eee4"
           >
@@ -173,27 +213,35 @@ export const Workstation = memo(function Workstation({
                 ? "Away"
                 : statusLabels[agent.status]}
           </Text>
-        </Billboard>
+        </OfficeLabel>
       )}
       {agent.status === "needs_attention" && (
-        <Text position={[0.48, 2.08, 0]} fontSize={0.3} color="#d34f55" anchorX="center">
-          ?
-        </Text>
+        <OfficeLabel position={[0, 1.2, 0]} offset={sideView ? 0 : 1} offsetX={sideView ? 1.8 : 0}>
+          <Text position={[1.05, 0, 0]} fontSize={0.3} color="#d34f55" anchorX="center">
+            ?
+          </Text>
+        </OfficeLabel>
       )}
       {agent.status === "queued" && (
-        <Text position={[0.48, 2.08, 0]} fontSize={0.2} color="#3979b7" anchorX="center">
-          ◷
-        </Text>
+        <OfficeLabel position={[0, 1.2, 0]} offset={sideView ? 0 : 1} offsetX={sideView ? 1.8 : 0}>
+          <Text position={[1.05, 0, 0]} fontSize={0.2} color="#3979b7" anchorX="center">
+            ◷
+          </Text>
+        </OfficeLabel>
       )}
       {agent.status === "failed" && (
-        <Text position={[0.48, 2.08, 0]} fontSize={0.22} color="#c44848" anchorX="center">
-          !
-        </Text>
+        <OfficeLabel position={[0, 1.2, 0]} offset={sideView ? 0 : 1} offsetX={sideView ? 1.8 : 0}>
+          <Text position={[1.05, 0, 0]} fontSize={0.22} color="#c44848" anchorX="center">
+            !
+          </Text>
+        </OfficeLabel>
       )}
       {agent.status === "offline" && (
-        <Text position={[0, 0.96, 0.25]} fontSize={0.12} color="#526b72" anchorX="center">
-          AWAY
-        </Text>
+        <OfficeLabel position={[0, 0.96, 0.25]} offset={0.3}>
+          <Text fontSize={0.12} color="#526b72" anchorX="center">
+            AWAY
+          </Text>
+        </OfficeLabel>
       )}
       {selected && (
         <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>

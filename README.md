@@ -14,11 +14,14 @@ builds the app, and creates a **Copilot Agent Office** desktop shortcut. It does
 reset your database, overwrite an existing `.env`, or require administrator rights.
 
 Double-click the shortcut (or `Launch-Agent-Office.cmd`) to start the built app and
-open your browser. The launcher keeps a console open; close it or press Ctrl+C to stop.
+open your browser. The launcher runs the server in the background; its window can close.
+Use `Stop-Agent-Office.cmd` to stop the background server owned by this folder.
+Logs are in `.agent-office\server.log` and `.agent-office\server-error.log`.
+For console debugging, run `.\Launch-Agent-Office.cmd -Foreground` and keep that window open.
 By default the built dashboard and API share **http://127.0.0.1:4000**.
 An already-running office is reused rather than starting a duplicate.
 
-After updating the source, close the running office and double-click
+After updating the source, stop the running office and double-click
 `Build-Agent-Office.cmd` to rebuild it, then use `Launch-Agent-Office.cmd` again.
 Build only compiles the app; it does not change your settings, reset the database,
 install dependencies, or recreate shortcuts. If dependencies changed, run
@@ -30,7 +33,7 @@ To also install the user-level Copilot lifecycle hooks during setup, run:
 .\Install-Agent-Office.cmd -ConnectAgents
 ```
 
-Keep the repository folder in place: shortcuts and hooks reference it. Close the
+Keep the repository folder in place: shortcuts and hooks reference it. Stop the
 running office before rerunning setup after an update (Windows locks native database
 libraries while they are in use). For scripted use, setup accepts `-NoShortcut` and
 the launcher accepts `-NoBrowser`. Node.js is a prerequisite, not bundled or installed
@@ -119,6 +122,25 @@ Docker alternative: `docker compose up --build`; the database is persisted in th
 Status rules and limitations are detailed in [docs/status-rules.md](docs/status-rules.md). Mock statuses are deterministic demo fixtures/events. GitHub activity is inferred and includes evidence, timestamp, confidence, and a human-readable explanation. “Direct” status is reserved for provider data that explicitly provides the status; no GitHub session API is assumed.
 
 ## Security and troubleshooting
+Use the **Office view** selector on the floor to switch between Isometric, Front,
+Left, Right, and Top down. Pan and zoom work in every view; Reset camera restores
+the selected view. Front and side views look down at 45 degrees to keep the floor visible.
+Scene labels face the camera, with agent captions beside desks in side views and
+above their subjects in top-down views. Side and overhead presets use wider framing.
+The **Show agent source** setting hides or shows CLI/VS Code prefixes in agent names
+throughout the dashboard and floor; it is remembered in this browser. Agents needing
+attention wave one raised arm (a static raised arm with reduced motion).
+Completion plays a 12-second cheer, celebratory sway, and farewell wave before settling.
+Attention uses a repeating 8-second wave-and-scan sequence until its status changes.
+Neither animation extends the configured waiting/idle timeout or blocks new work.
+Watching-task agents have an animated monitor activity indicator (decorative, not measured
+task progress). Working desk agents occasionally lift their coffee cup for a sip;
+reduced-motion mode keeps the cup on the desk and the monitor indicator static.
+The attention queue shows waiting time and sorts oldest requests first, using the
+hook's waiting-start timestamp when available, otherwise the agent update timestamp.
+Selecting an entry opens its profile; provider task links are available there.
+Local hooks do not expose reliable editor/terminal session links.
+Your view, zoom, pan, and display preferences are remembered in this browser.
 
 If the production dashboard loads but the office stays blank, update and rebuild the
 server as well as the web app with `Build-Agent-Office.cmd`. The 3D text renderer requires blob workers/generated

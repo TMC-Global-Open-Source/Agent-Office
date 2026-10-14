@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import {
   AgentFilterTabs,
   AgentList,
@@ -7,7 +7,7 @@ import {
   StatusSummary,
   TokenUsageSummary,
 } from "./App.js";
-import { filterAgents } from "./store.js";
+import { filterAgents, useOfficeStore } from "./store.js";
 import type { Agent } from "@agent-office/shared";
 
 const sample: Agent = {
@@ -36,6 +36,18 @@ const sample: Agent = {
 };
 
 describe("dashboard components", () => {
+  it("uses the source display setting in agent list names", () => {
+    useOfficeStore.setState({ showAgentSource: false });
+    render(
+      <AgentList
+        agents={[{ ...sample, source: "local", displayName: "Copilot CLI · Office" }]}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText("Office")).toBeInTheDocument();
+    expect(screen.queryByText("Copilot CLI · Office")).not.toBeInTheDocument();
+    act(() => useOfficeStore.setState({ showAgentSource: true }));
+  });
   afterEach(() => vi.unstubAllGlobals());
   it("shows token telemetry availability without treating missing counts as zero", async () => {
     vi.stubGlobal(

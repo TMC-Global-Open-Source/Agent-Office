@@ -1,10 +1,12 @@
 param(
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$Foreground
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $process = $null
+$backgroundReady = $false
 
 function Get-OfficeHealth([string]$url) {
     try {
@@ -56,13 +58,19 @@ try {
     }
     $entry = Join-Path $root 'apps\server\dist\index.js'
     if (-not (Test-Path -LiteralPath $entry) -or -not (Test-Path -LiteralPath (Join-Path $root 'apps\web\dist\index.html'))) {
-        throw 'Built application files are missing. Run Install-Agent-Office.cmd first.'
+        throw 'Built application files are missing. Run Build-Agent-Office.cmd (or Install-Agent-Office.cmd for first setup).'
     }
     $env:NODE_ENV = 'production'
-    $process = Start-Process -FilePath $node.Source -ArgumentList @("`"$entry`"") -WorkingDirectory $root -NoNewWindow -PassThru
+    $stateDir = Join-Path $root '.agent-office'
+    if ($Foreground) {
+        $process = Start-Process -FilePath $node.Source -ArgumentList @("`"$entry`"") -WorkingDirectory $root -NoNewWindow -PassThru
+    } else {
+        New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
+        $process = Start-Process -FilePath $node.Source -ArgumentList @("`"$entry`"") -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $stateDir 'server.log') -RedirectStandardError (Join-Path $stateDir 'server-error.log')
+    }
     $ready = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        if ($process.HasExited) { throw 'Agent Office stopped during startup. Review the server error above.' }
+        if ($process.HasExited) { throw 'Agent Office stopped during startup. Review .agent-office\server-error.log (or the foreground console).' }
         $health = Get-OfficeHealth $apiUrl
         if ($health) {
             if ($health.application -ne 'copilot-agent-office') { throw 'Another application is using the configured port.' }
@@ -71,10 +79,22 @@ try {
         }
         Start-Sleep -Milliseconds 500
     }
-    if (-not $ready) { throw 'Agent Office did not become ready. Review the console output and .env settings.' }
+    if (-not $ready) { throw 'Agent Office did not become ready. Review .agent-office\server-error.log (or the foreground console) and .env settings.' }
+    if (-not $Foreground) {
+        @{
+            pid = $process.Id
+            startedAt = $process.StartTime.ToUniversalTime().ToString('o')
+            entry = $entry
+        } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateDir 'server.json') -Encoding UTF8
+        $backgroundReady = $true
+    }
     if (-not $NoBrowser) { Start-Process $apiUrl }
     Write-Host ''
     Write-Host "Agent Office is running at $apiUrl"
+    if ($backgroundReady) {
+        Write-Host 'Running in the background. Use Stop-Agent-Office.cmd to stop it.'
+        exit 0
+    }
     Write-Host 'Keep this window open. Press Ctrl+C or close the window to stop the office.'
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { throw "Agent Office exited with code $($process.ExitCode)." }
@@ -82,7 +102,7 @@ try {
     Write-Error $_ -ErrorAction Continue
     exit 1
 } finally {
-    if ($process -and -not $process.HasExited) {
+    if ($process -and -not $backgroundReady -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
     }
 }

@@ -18,9 +18,9 @@ try {
     if (-not (Test-Path -LiteralPath $envPath)) {
         Copy-Item -LiteralPath (Join-Path $root '.env.example') -Destination $envPath
     }
-    Write-Host 'Installing dependencies. Close any running Agent Office console first to avoid database-engine file locks.'
+    Write-Host 'Installing dependencies. Run Stop-Agent-Office.cmd first (or close its foreground console) to avoid database-engine file locks.'
     & npm.cmd ci --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Close running Agent Office processes and retry setup. Your settings and database were not reset.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Stop running Agent Office processes and retry setup. Your settings and database were not reset.' }
     & npm.cmd run db:migrate
     if ($LASTEXITCODE -ne 0) { throw 'Database migration failed. Review the output above.' }
     & npm.cmd run build

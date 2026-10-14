@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, Text } from "@react-three/drei";
 import * as THREE from "three";
+import { OfficeLabel } from "./OfficeLabel.js";
 import {
   advanceJanitor,
   createJanitorEncounter,
@@ -144,16 +145,17 @@ export function JanitorEncounter({
         </mesh>
       </group>
       {labels && (
-        <Text
-          position={[0, 2.03, 0]}
-          fontSize={0.14}
-          color="#465b7c"
-          anchorX="center"
-          outlineWidth={0.008}
-          outlineColor="#f3eee4"
-        >
-          {reducedMotion ? "JANITOR · QUIET VISIT" : `JANITOR · ${caption ?? "VISITOR"}`}
-        </Text>
+        <OfficeLabel position={[0, 1, 0]} offset={1.1}>
+          <Text
+            fontSize={0.14}
+            color="#465b7c"
+            anchorX="center"
+            outlineWidth={0.008}
+            outlineColor="#f3eee4"
+          >
+            {reducedMotion ? "JANITOR · QUIET VISIT" : `JANITOR · ${caption ?? "VISITOR"}`}
+          </Text>
+        </OfficeLabel>
       )}
       {caption !== null && (
         <Html>

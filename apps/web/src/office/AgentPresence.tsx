@@ -1,6 +1,7 @@
 import { useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Billboard, Text } from "@react-three/drei";
+import { Text } from "@react-three/drei";
+import { OfficeLabel } from "./OfficeLabel.js";
 import * as THREE from "three";
 import type { Agent } from "@agent-office/shared";
 import type { DeskData } from "./Workstation.js";
@@ -91,7 +92,7 @@ export function AgentPresence({
         drinkingWater={visit?.phase === "drinking"}
       />
       {visit && labels && (
-        <Billboard position={[0, 2.05, 0]}>
+        <OfficeLabel position={[0, 1, 0]} offset={1.1}>
           <Text
             fontSize={0.15}
             color="#526b72"
@@ -108,7 +109,7 @@ export function AgentPresence({
                 ? "Water break"
                 : "Back to the couch"}
           </Text>
-        </Billboard>
+        </OfficeLabel>
       )}
     </group>
   );

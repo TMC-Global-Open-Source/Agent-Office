@@ -25,6 +25,9 @@ import type { Agent, AgentActivity, AgentState, AppConfig } from "@agent-office/
 import type { UsageHistory } from "@agent-office/shared";
 import { getOfficeActivity, officeActivityLabels } from "@agent-office/shared";
 import { OfficeScene } from "./office/OfficeScene.js";
+import { agentDisplayName } from "./agent-name.js";
+import { attentionQueue, waitingLabel } from "./attention-queue.js";
+import { officeViews, type OfficeView } from "./office/camera-views.js";
 import { everyoneIdle } from "./office/janitor-animation.js";
 import { filterAgents, statusColors, statusLabels, useOfficeStore } from "./store.js";
 
@@ -259,7 +262,9 @@ export function AgentList({
         <button className="agent-row" key={agent.id} onClick={() => onSelect(agent.id)}>
           <span className="summary-dot" style={{ background: statusColors[agent.status] }} />
           <span className="agent-row-main">
-            <strong>{agent.displayName}</strong>
+            <strong>
+              <AgentName agent={agent} />
+            </strong>
             <small>
               {agent.repositoryOwner}/{agent.repositoryName} · {agent.taskTitle ?? "No task title"}
             </small>
@@ -279,10 +284,17 @@ export function AgentList({
   );
 }
 
+function AgentName({ agent }: { agent: Agent }) {
+  const showSource = useOfficeStore((state) => state.showAgentSource);
+  return <>{agentDisplayName(agent, showSource)}</>;
+}
+
 function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => void }) {
-  const parentName = useOfficeStore(
-    (state) => state.agents.find((item) => item.id === agent.metadata.parentAgentId)?.displayName,
-  );
+  const showSource = useOfficeStore((state) => state.showAgentSource);
+  const parentName = useOfficeStore((state) => {
+    const parent = state.agents.find((item) => item.id === agent.metadata.parentAgentId);
+    return parent ? agentDisplayName(parent, state.showAgentSource) : undefined;
+  });
   const [color, setColor] = useState(agent.avatarColor);
   const [savingColor, setSavingColor] = useState(false);
   const [colorMessage, setColorMessage] = useState("");
@@ -331,11 +343,13 @@ function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => void })
     };
   }, [agent.id]);
   return (
-    <aside className="detail-panel" aria-label={`${agent.displayName} details`}>
+    <aside className="detail-panel" aria-label={`${agentDisplayName(agent, showSource)} details`}>
       <div className="panel-heading">
         <div>
           <span className="eyebrow">AGENT PROFILE</span>
-          <h2>{agent.displayName}</h2>
+          <h2>
+            <AgentName agent={agent} />
+          </h2>
         </div>
         <button className="icon-button" onClick={onClose} aria-label="Close details">
           <X size={18} />
@@ -470,6 +484,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, []);
   const options: Array<[keyof typeof state, string]> = [
     ["labels", "Show name labels"],
+    ["showAgentSource", "Show agent source"],
     ["decorations", "Show office decorations"],
     ["shadows", "Enable shadows"],
     ["performanceMode", "Performance mode"],
@@ -528,7 +543,13 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               checked={Boolean(state[key])}
               onChange={() =>
                 state.toggle(
-                  key as "labels" | "decorations" | "shadows" | "performanceMode" | "autoFocus",
+                  key as
+                    | "labels"
+                    | "decorations"
+                    | "shadows"
+                    | "performanceMode"
+                    | "autoFocus"
+                    | "showAgentSource",
                 )
               }
             />
@@ -671,6 +692,12 @@ export function App() {
   const reducedMotion = useReducedMotion();
   const resetRef = useRef<(() => void) | null>(null);
   const zoomRef = useRef<((direction: number) => void) | null>(null);
+  const officeView = state.officeView;
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
   const [demoMessage, setDemoMessage] = useState("");
@@ -686,7 +713,9 @@ export function App() {
     socket.on("agent:created", (agent: Agent) => {
       state.upsertAgent(agent);
       if (useOfficeStore.getState().autoFocus) state.select(agent.id);
-      setDemoMessage(`New agent joined: ${agent.displayName}`);
+      setDemoMessage(
+        `New agent joined: ${agentDisplayName(agent, useOfficeStore.getState().showAgentSource)}`,
+      );
       window.setTimeout(() => setDemoMessage(""), 3000);
     });
     socket.on("agent:updated", (agent: Agent) => state.upsertAgent(agent));
@@ -711,11 +740,7 @@ export function App() {
   );
   const selectedAgent = state.agents.find((agent) => agent.id === state.selectedId);
   const desks = state.desks;
-  const attention = state.agents
-    .filter((agent) => agent.status === "needs_attention")
-    .sort((a, b) =>
-      (a.lastActivityAt ?? a.updatedAt).localeCompare(b.lastActivityAt ?? b.updatedAt),
-    );
+  const attention = attentionQueue(state.agents);
   const repositories = [
     ...new Set(
       state.agents
@@ -871,6 +896,7 @@ export function App() {
               <AgentList agents={filtered} onSelect={selectAgent} />
             ) : (
               <OfficeScene
+                view={officeView}
                 agents={filtered}
                 allAgents={state.agents}
                 allIdle={everyoneIdle(state.agents)}
@@ -888,6 +914,21 @@ export function App() {
             )}
             {!state.listMode && (
               <div className="scene-controls">
+                <select
+                  className="office-view-select"
+                  aria-label="Office view"
+                  value={officeView}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value in officeViews) state.setOfficeView(value as OfficeView);
+                  }}
+                >
+                  {Object.entries(officeViews).map(([value, preset]) => (
+                    <option key={value} value={value}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
                 <button
                   className="icon-button"
                   title="Zoom in"
@@ -990,8 +1031,11 @@ export function App() {
                     <AlertCircle size={17} />
                   </span>
                   <span className="attention-copy">
-                    <strong>{agent.displayName}</strong>
+                    <strong>
+                      <AgentName agent={agent} />
+                    </strong>
                     <small>{agent.statusReason ?? agent.taskTitle}</small>
+                    <small>{waitingLabel(agent, now)} · Select to inspect</small>
                   </span>
                   <ChevronRight size={15} />
                 </button>
@@ -1018,10 +1062,12 @@ export function App() {
                 onClick={() => selectAgent(agent.id)}
               >
                 <span className="roster-avatar" style={{ background: agent.avatarColor }}>
-                  {agent.displayName.slice(0, 1)}
+                  {agentDisplayName(agent, state.showAgentSource).slice(0, 1)}
                 </span>
                 <span className="roster-copy">
-                  <strong>{agent.displayName}</strong>
+                  <strong>
+                    <AgentName agent={agent} />
+                  </strong>
                   <small>{agent.repositoryName ?? "Unassigned"}</small>
                   <small>Tokens used: {tokenUsageLabel(agent)}</small>
                   {agent.status === "offline" && <small>Away · {lastSeenLabel(agent)}</small>}

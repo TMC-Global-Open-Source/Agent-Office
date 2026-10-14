@@ -6,6 +6,7 @@ import { getOfficeActivity } from "@agent-office/shared";
 import { loungePersonality, loungePose } from "./lounge-animation.js";
 import { TypingArms } from "./TypingArms.js";
 import { activityPose } from "./activity-animation.js";
+import { statusPose } from "./status-animation.js";
 
 export function AgentAvatar({
   agent,
@@ -82,6 +83,23 @@ export function AgentAvatar({
       }
       return;
     }
+    if (agent.status === "needs_attention" || agent.status === "completed") {
+      const timestamp =
+        agent.status === "completed" ? agent.completedAt : agent.metadata.waitingForPromptSince;
+      const started = typeof timestamp === "string" ? Date.parse(timestamp) : NaN;
+      const statusElapsed = Number.isFinite(started)
+        ? Math.max(0, (Date.now() - started) / 1000)
+        : elapsed;
+      const pose = statusPose(agent.status, statusElapsed, reducedMotion);
+      if (leftArm.current) leftArm.current.rotation.z = pose.leftZ;
+      if (rightArm.current) rightArm.current.rotation.z = pose.rightZ;
+      if (head.current) head.current.rotation.set(pose.headX, pose.headY, 0);
+      if (body.current) {
+        body.current.position.y += pose.bodyY;
+        body.current.rotation.z = pose.bodyZ;
+      }
+      return;
+    }
     if (reducedMotion) {
       if (leftArm.current) leftArm.current.rotation.set(0.12, 0, 0);
       if (rightArm.current) rightArm.current.rotation.set(0.12, 0, 0);
@@ -91,17 +109,11 @@ export function AgentAvatar({
     }
     const time = clock.elapsedTime;
     if (leftArm.current && rightArm.current) {
-      if (agent.status === "completed" && elapsed < 2.2) {
-        leftArm.current.rotation.z = 2.5;
-        rightArm.current.rotation.z = -2.5;
-      } else if (agent.status === "idle" && idleVariant === 0) {
+      if (agent.status === "idle" && idleVariant === 0) {
         leftArm.current.rotation.x = Math.sin(time * 0.5) * 0.12 + 0.12;
       } else if (agent.status === "idle" && idleVariant === 1) {
         const sip = Math.max(0, Math.sin(time * 0.55 + agent.id.length) ** 10);
         rightArm.current.rotation.x = 0.15 + sip * 0.9;
-      } else if (agent.status === "needs_attention") {
-        leftArm.current.rotation.z = Math.sin(time * 3.6) * 0.18 + 2.55;
-        rightArm.current.rotation.z = -Math.sin(time * 3.6) * 0.18 - 2.55;
       } else {
         leftArm.current.rotation.x = 0.12;
         rightArm.current.rotation.x = 0.12;

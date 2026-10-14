@@ -1,5 +1,6 @@
 import { Line, Text } from "@react-three/drei";
 import type { SubagentTeam } from "./subagent-layout.js";
+import { OfficeLabel } from "./OfficeLabel.js";
 
 export function SubagentTeams({ teams, labels }: { teams: SubagentTeam[]; labels: boolean }) {
   return (
@@ -23,17 +24,17 @@ export function SubagentTeams({ teams, labels }: { teams: SubagentTeam[]; labels
               lineWidth={2}
             />
             {labels && (
-              <Text
-                position={[(left + right) / 2, 0.01, back + 0.25]}
-                rotation={[-Math.PI / 2, 0, 0]}
-                color="#9a1a41"
-                fontSize={0.16}
-                maxWidth={right - left - 0.3}
-                textAlign="center"
-                anchorY="top"
-              >
-                {team.label}
-              </Text>
+              <OfficeLabel position={[(left + right) / 2, 0.1, back]} offset={0.3}>
+                <Text
+                  color="#9a1a41"
+                  fontSize={0.16}
+                  maxWidth={right - left - 0.3}
+                  textAlign="center"
+                  anchorY="top"
+                >
+                  {team.label}
+                </Text>
+              </OfficeLabel>
             )}
           </group>
         );
