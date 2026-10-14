@@ -18,6 +18,12 @@ open your browser. The launcher keeps a console open; close it or press Ctrl+C t
 By default the built dashboard and API share **http://127.0.0.1:4000**.
 An already-running office is reused rather than starting a duplicate.
 
+After updating the source, close the running office and double-click
+`Build-Agent-Office.cmd` to rebuild it, then use `Launch-Agent-Office.cmd` again.
+Build only compiles the app; it does not change your settings, reset the database,
+install dependencies, or recreate shortcuts. If dependencies changed, run
+`Install-Agent-Office.cmd` instead.
+
 To also install the user-level Copilot lifecycle hooks during setup, run:
 
 ```powershell
@@ -113,6 +119,15 @@ Docker alternative: `docker compose up --build`; the database is persisted in th
 Status rules and limitations are detailed in [docs/status-rules.md](docs/status-rules.md). Mock statuses are deterministic demo fixtures/events. GitHub activity is inferred and includes evidence, timestamp, confidence, and a human-readable explanation. “Direct” status is reserved for provider data that explicitly provides the status; no GitHub session API is assumed.
 
 ## Security and troubleshooting
+
+If the production dashboard loads but the office stays blank, update and rebuild the
+server as well as the web app with `Build-Agent-Office.cmd`. The 3D text renderer requires blob workers/generated
+modules and font data from the pinned unicode-font-resolver CDN path; the production
+Content Security Policy explicitly permits those resources. Font loading requires
+access to `cdn.jsdelivr.net`. Local HTTP hosting does not enable HTTPS upgrade directives.
+
+Run `npm run test:production` to build the application and check that the office
+renders under production headers without browser errors, using an isolated mock database.
 
 The GitHub adapter is read-only. Requests are validated, content is rendered as text, secrets are excluded from API responses and logs, and Helmet applies a restrictive policy. If GitHub fails or is rate-limited, the last snapshot remains visible and provider health reports the problem; retries are delayed. Use `AGENT_PROVIDER=mock` to verify local setup without credentials.
 

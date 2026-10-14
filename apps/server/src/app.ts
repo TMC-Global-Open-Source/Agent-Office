@@ -63,12 +63,19 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", "blob:"],
+        workerSrc: ["'self'", "blob:"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "ws:", "wss:"],
+        connectSrc: [
+          "'self'",
+          "ws:",
+          "wss:",
+          "https://cdn.jsdelivr.net/gh/lojjic/unicode-font-resolver@v1.0.1/packages/data/",
+        ],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
+        upgradeInsecureRequests: null,
       },
     },
   }),
