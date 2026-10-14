@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Agent {
+  id                 String          @id
+  displayName        String
+  source             String
+  repositoryOwner    String?
+  repositoryName     String?
+  issueNumber        Int?
+  pullRequestNumber  Int?
+  taskTitle          String?
+  taskUrl            String?
+  status             String
+  statusReason       String?
+  statusConfidence   Float           @default(1)
+  statusKind         String          @default("mock")
+  lastActivityAt     DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  metadata           String          @default("{}")
+  tokensUsed         Int?
+  desk               Desk?
+  activities         AgentActivity[]
+  avatar             AvatarProfile?
+}
+
+model AgentActivity {
+  id         String   @id
+  agentId    String
+  kind       String
+  summary    String
+  occurredAt DateTime
+  url        String?
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, occurredAt])
+}
+
+model Desk {
+  id        String   @id
+  agentId   String   @unique
+  row       Int
+  column    Int
+  active    Boolean  @default(true)
+  reservedUntil DateTime?
+  createdAt DateTime @default(now())
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([row, column])
+}
+
+model AvatarProfile {
+  agentId    String @id
+  color      String
+  accessory  String @default("none")
+  seed       Int
+  agent      Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model ProviderSnapshot {
+  id          Int      @id @default(1)
+  provider    String
+  healthy     Boolean
+  stale       Boolean  @default(false)
+  message     String
+  lastSuccessAt DateTime?
+  rateLimitResetAt DateTime?
+  updatedAt   DateTime @updatedAt
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
