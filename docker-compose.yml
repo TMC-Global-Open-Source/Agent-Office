@@ -1,0 +1,18 @@
+services:
+  agent-office:
+    build: .
+    ports:
+      - "${LOCAL_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4000
+      DATABASE_URL: file:/data/agent-office.db
+      AGENT_PROVIDER: ${AGENT_PROVIDER:-mock}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_ORG: ${GITHUB_ORG:-}
+      GITHUB_REPOSITORIES: ${GITHUB_REPOSITORIES:-}
+    volumes:
+      - agent-office-data:/data
+volumes:
+  agent-office-data:

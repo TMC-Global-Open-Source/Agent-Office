@@ -1,0 +1,37 @@
+{
+  "name": "copilot-agent-office",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "cross-env NODE_ENV=production node apps/server/dist/index.js",
+    "dev": "concurrently -k -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:web": "npm run dev --workspace @agent-office/web",
+    "dev:server": "npm run dev --workspace @agent-office/server",
+    "build": "npm run build --workspace @agent-office/shared && npm run build --workspace @agent-office/server && npm run build --workspace @agent-office/web",
+    "test": "npm run test --workspace @agent-office/shared && npm run test --workspace @agent-office/server && npm run test --workspace @agent-office/web",
+    "test:e2e": "npm run test:e2e --workspace @agent-office/web",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspace @agent-office/shared && npm run typecheck --workspace @agent-office/server && npm run typecheck --workspace @agent-office/web",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,css,html}\"",
+    "db:migrate": "npm run db:migrate --workspace @agent-office/server",
+    "db:seed": "npm run db:seed --workspace @agent-office/server",
+    "db:reset": "npm run db:reset --workspace @agent-office/server",
+    "connect:agents": "node apps/server/scripts/connect-local-agents.mjs",
+    "disconnect:agents": "node apps/server/scripts/connect-local-agents.mjs --remove",
+    "postinstall": "prisma generate --schema apps/server/prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.13.10",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1"
+  }
+}
