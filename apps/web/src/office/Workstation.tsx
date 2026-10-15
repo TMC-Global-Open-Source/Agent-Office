@@ -3,6 +3,7 @@ import { Text } from "@react-three/drei";
 import { OfficeLabel } from "./OfficeLabel.js";
 import type { OfficeView } from "./camera-views.js";
 import { coffeeSip } from "./desk-animation.js";
+import { MonitorScreen } from "./MonitorScreen.js";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Agent } from "@agent-office/shared";
@@ -37,11 +38,9 @@ export const Workstation = memo(function Workstation({
   const root = useRef<THREE.Group>(null);
   const glow = useRef<THREE.MeshStandardMaterial>(null);
   const deskCup = useRef<THREE.Mesh>(null);
-  const taskIndicator = useRef<THREE.Group>(null);
   const x = (desk.column - 2) * 3.15;
   const z = desk.row * 3.15;
   const sideView = view === "left" || view === "right";
-  const monitoring = agent.status === "working" && getOfficeActivity(agent) === "monitoring";
   useFrame(({ clock }) => {
     if (deskCup.current)
       deskCup.current.visible = !(
@@ -51,9 +50,6 @@ export const Workstation = memo(function Workstation({
         ) &&
         coffeeSip(agent.id, clock.elapsedTime, reducedMotion) > 0
       );
-    if (taskIndicator.current) {
-      taskIndicator.current.position.x = reducedMotion ? 0 : Math.sin(clock.elapsedTime * 2) * 0.19;
-    }
     if (root.current && agent.status === "spawning" && !reducedMotion) {
       root.current.position.y = THREE.MathUtils.lerp(root.current.position.y, 0, 0.07);
     }
@@ -104,26 +100,7 @@ export const Workstation = memo(function Workstation({
         <boxGeometry args={[0.34, 0.025, 0.18]} />
         <meshStandardMaterial color="#384b50" />
       </mesh>
-      {monitoring && (
-        <group position={[0, 1.19, -0.17]}>
-          {[0, 1, 2].map((line) => (
-            <mesh key={line} position={[-0.06, 0.1 - line * 0.065, 0]}>
-              <planeGeometry args={[0.34 - line * 0.06, 0.014]} />
-              <meshBasicMaterial color="#a9b7b7" />
-            </mesh>
-          ))}
-          <mesh position={[0, -0.11, 0]}>
-            <planeGeometry args={[0.48, 0.025]} />
-            <meshBasicMaterial color="#263b42" />
-          </mesh>
-          <group ref={taskIndicator} position={[0, -0.11, 0.002]}>
-            <mesh>
-              <planeGeometry args={[0.1, 0.025]} />
-              <meshBasicMaterial color="#e5c982" />
-            </mesh>
-          </group>
-        </group>
-      )}
+      <MonitorScreen activity={getOfficeActivity(agent)} reducedMotion={reducedMotion} />
       {[-0.105, -0.035, 0.035, 0.105].map((keyX) =>
         [-0.04, 0.02, 0.08].map((keyZ) => (
           <mesh key={`${keyX}:${keyZ}`} position={[keyX, 0.886, 0.13 + keyZ]}>

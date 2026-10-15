@@ -47,7 +47,9 @@ const runtimeNames = {
   vscode: "VS Code Copilot",
 } as const;
 
-function stableAgentId(event: LocalHookEvent): string {
+export function stableAgentId(
+  event: Pick<LocalHookEvent, "runtime" | "sessionId" | "subagentId">,
+): string {
   const identity = `${event.runtime}:${event.sessionId}:${event.subagentId ?? "main"}`;
   return `local:${createHash("sha256").update(identity).digest("hex").slice(0, 32)}`;
 }

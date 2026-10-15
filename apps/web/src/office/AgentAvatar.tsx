@@ -77,6 +77,10 @@ export function AgentAvatar({
       return;
     }
     if (isWorking) {
+      if (body.current && activity === "typing" && !reducedMotion) {
+        body.current.rotation.x = 0.035 + Math.sin(clock.elapsedTime * 2.4) * 0.015;
+        body.current.rotation.z = Math.sin(clock.elapsedTime * 3.2) * 0.018;
+      }
       if (head.current) {
         const pose = activityPose(agent.id, activity, clock.elapsedTime, reducedMotion);
         head.current.rotation.set(pose.headX, pose.headY, 0);

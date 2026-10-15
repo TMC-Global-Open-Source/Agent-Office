@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { io, type Socket } from "socket.io-client";
 import {
   Activity,
@@ -10,6 +11,8 @@ import {
   Crosshair,
   Github,
   List,
+  Maximize,
+  Minimize,
   MonitorCog,
   RefreshCw,
   Search,
@@ -22,11 +25,12 @@ import {
   ZoomOut,
 } from "lucide-react";
 import type { Agent, AgentActivity, AgentState, AppConfig } from "@agent-office/shared";
-import type { UsageHistory } from "@agent-office/shared";
+import type { UsageHistory, UsageSourceId } from "@agent-office/shared";
 import { getOfficeActivity, officeActivityLabels } from "@agent-office/shared";
 import { OfficeScene } from "./office/OfficeScene.js";
 import { agentDisplayName } from "./agent-name.js";
 import { attentionQueue, waitingLabel } from "./attention-queue.js";
+import { creditLabel, tokenTotal } from "./token-counts.js";
 import { officeViews, type OfficeView } from "./office/camera-views.js";
 import { everyoneIdle } from "./office/janitor-animation.js";
 import { filterAgents, statusColors, statusLabels, useOfficeStore } from "./store.js";
@@ -131,6 +135,83 @@ function tokenUsageLabel(agent: Agent): string {
   return agent.tokensUsed == null ? "Not reported" : agent.tokensUsed.toLocaleString();
 }
 
+function AgentTokens({ agent }: { agent: Agent }) {
+  const usage = useOfficeStore((state) =>
+    state.usage?.agents.find((item) => item.agentId === agent.id),
+  );
+  return (
+    <>
+      {usage
+        ? `${tokenTotal(usage)} · ${creditLabel(usage)} AI credits · 30 days`
+        : tokenUsageLabel(agent)}
+    </>
+  );
+}
+
+const sourceLabels: Record<UsageSourceId, string> = {
+  "copilot-cli": "Copilot CLI",
+  vscode: "VS Code",
+};
+
+export function UsageByFolder() {
+  const usage = useOfficeStore((state) => state.usage);
+  const error = useOfficeStore((state) => state.usageError);
+  return (
+    <div className="usage-repositories">
+      <h3>By folder · 30 days</h3>
+      {error ? (
+        <p role="alert">{error}</p>
+      ) : !usage ? (
+        <p>Loading attribution...</p>
+      ) : !usage.available ? (
+        <p>{usage.message}</p>
+      ) : (
+        <>
+          <div className="repository-usage-list">
+            {(usage.folders ?? []).map((repo) => (
+              <div className="repository-usage-row" key={repo.folder ?? "unknown"}>
+                <strong>{repo.folder ?? "Folder not reported"}</strong>
+                <span>{tokenTotal(repo)} tokens</span>
+                <span>AI credits: {creditLabel(repo)}</span>
+                <small>
+                  Input: {repo.inputTokens?.toLocaleString() ?? "Not reported"} · Output:{" "}
+                  {repo.outputTokens?.toLocaleString() ?? "Not reported"}
+                </small>
+                <small>
+                  {repo.sources.map((source) => sourceLabels[source]).join(" + ")} · {repo.sessions}{" "}
+                  sessions · {repo.calls} calls
+                </small>
+                {repo.repositories.length > 0 && (
+                  <small>Repository: {repo.repositories.join(", ")}</small>
+                )}
+              </div>
+            ))}
+          </div>
+          {!usage.folders?.length && <p>No usage recorded in this period.</p>}
+          <p>
+            Unattributed to office agents: {tokenTotal(usage.unattributed)} tokens · AI credits:{" "}
+            {creditLabel(usage.unattributed)} · {usage.unattributed.calls} calls.
+          </p>
+          <details>
+            <summary>Attribution coverage</summary>
+            <p>{usage.message}</p>
+            {usage.sources?.map((source) => (
+              <p key={source.source}>
+                {sourceLabels[source.source]}: {source.message}
+              </p>
+            ))}
+            <p>
+              Folder and agent counts are two views of the same usage, not additive. Unmatched usage
+              is never split between agents. VS Code calls are chat requests, which can include
+              several model calls.
+            </p>
+          </details>
+        </>
+      )}
+    </div>
+  );
+}
+
 function lastSeenLabel(agent: Agent): string {
   return agent.lastActivityAt
     ? `Last seen ${new Date(agent.lastActivityAt).toLocaleString()}`
@@ -165,7 +246,15 @@ export function TokenUsageSummary({ agents }: { agents: Agent[] }) {
       window.clearInterval(timer);
     };
   }, []);
-  const reported = agents.filter((agent) => agent.tokensUsed != null);
+  const attribution = useOfficeStore((state) => state.usage);
+  const reported = agents.filter(
+    (agent) =>
+      agent.tokensUsed != null ||
+      attribution?.agents.some(
+        (item) =>
+          item.agentId === agent.id && (item.inputTokens !== null || item.outputTokens !== null),
+      ),
+  );
   return (
     <section className="rail-card token-usage-card" aria-label="Token usage">
       <div className="rail-title">
@@ -206,7 +295,25 @@ export function TokenUsageSummary({ agents }: { agents: Agent[] }) {
                   <dt>Calls with counts</dt>
                   <dd>{history.callsWithTokenCounts.toLocaleString()}</dd>
                 </div>
+                <div>
+                  <dt>AI credits</dt>
+                  <dd>{creditLabel(history)}</dd>
+                </div>
               </dl>
+            )}
+            {history.available && history.sources && (
+              <ul className="usage-sources">
+                {history.sources.map((source) => (
+                  <li key={source.source}>
+                    <strong>{sourceLabels[source.source]}</strong>
+                    <span>
+                      {source.available
+                        ? `${creditLabel(source)} AI credits · ${tokenTotal(source)} tokens · ${source.calls.toLocaleString()} ${source.source === "vscode" ? "requests" : "calls"}`
+                        : "Not available"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
             {history.available && (
               <p className="usage-date">
@@ -219,12 +326,14 @@ export function TokenUsageSummary({ agents }: { agents: Agent[] }) {
               <summary>Source &amp; coverage</summary>
               {history.available && <p>{history.message}</p>}
               <p>
-                Source: Copilot local history, read directly. No Cost Lens dependency. These totals
-                are not assigned to live agents.
+                Sources: the Copilot CLI local usage database and VS Code chatSessions logs, read
+                directly and read-only. No Cost Lens dependency. Only timestamps, token counts and
+                credits are read from VS Code logs; chat content is discarded. These totals use the
+                same sources as the agent and folder breakdown below.
               </p>
               <p>
-                CLI and VS Code lifecycle hooks do not include token usage. Counts appear only when
-                a usage adapter supplies them; missing counts are not zero.
+                Lifecycle hooks do not include token usage, so these adapters supply it. Missing
+                counts are reported as not reported, never as zero.
               </p>
             </details>
           </>
@@ -232,6 +341,7 @@ export function TokenUsageSummary({ agents }: { agents: Agent[] }) {
           <p>Loading local usage history...</p>
         )}
       </div>
+      <UsageByFolder />
       <div className="usage-live">
         <div className="usage-live-heading">
           <h3>Live agent counts</h3>
@@ -268,7 +378,9 @@ export function AgentList({
             <small>
               {agent.repositoryOwner}/{agent.repositoryName} · {agent.taskTitle ?? "No task title"}
             </small>
-            <small>Tokens used: {tokenUsageLabel(agent)}</small>
+            <small>
+              Tokens used: <AgentTokens agent={agent} />
+            </small>
             <small>Activity: {officeActivityLabels[getOfficeActivity(agent)]}</small>
             {agent.status === "offline" && <small>{lastSeenLabel(agent)}</small>}
             {typeof agent.metadata.parentAgentId === "string" && (
@@ -289,7 +401,10 @@ function AgentName({ agent }: { agent: Agent }) {
   return <>{agentDisplayName(agent, showSource)}</>;
 }
 
-function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+export function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const usage = useOfficeStore((state) =>
+    state.usage?.agents.find((item) => item.agentId === agent.id),
+  );
   const showSource = useOfficeStore((state) => state.showAgentSource);
   const parentName = useOfficeStore((state) => {
     const parent = state.agents.find((item) => item.id === agent.metadata.parentAgentId);
@@ -342,8 +457,50 @@ function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => void })
       active = false;
     };
   }, [agent.id]);
+  const panelRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    let start: { x: number; y: number } | null = null;
+    const outside = (event: Event) => {
+      const target = event.target;
+      return (
+        target instanceof Node &&
+        !panelRef.current?.contains(target) &&
+        !(target instanceof Element && target.closest(".fullscreen-button, .scene-controls"))
+      );
+    };
+    const down = (event: PointerEvent) => {
+      start = outside(event) ? { x: event.clientX, y: event.clientY } : null;
+    };
+    // Close on a click outside the card, but not when the pointer was dragged to orbit the camera.
+    const up = (event: PointerEvent) => {
+      if (
+        start &&
+        outside(event) &&
+        Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6
+      )
+        closeRef.current();
+      start = null;
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRef.current();
+    };
+    document.addEventListener("pointerdown", down, true);
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerdown", down, true);
+      document.removeEventListener("pointerup", up, true);
+      document.removeEventListener("keydown", key);
+    };
+  }, []);
   return (
-    <aside className="detail-panel" aria-label={`${agentDisplayName(agent, showSource)} details`}>
+    <aside
+      ref={panelRef}
+      className="detail-panel"
+      aria-label={`${agentDisplayName(agent, showSource)} details`}
+    >
       <div className="panel-heading">
         <div>
           <span className="eyebrow">AGENT PROFILE</span>
@@ -423,12 +580,29 @@ function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => void })
         <dt>Last activity</dt>
         <dd>{agent.lastActivityAt ? new Date(agent.lastActivityAt).toLocaleString() : "—"}</dd>
         <dt>Tokens used</dt>
-        <dd>{tokenUsageLabel(agent)}</dd>
+        <dd>
+          <AgentTokens agent={agent} />
+        </dd>
+        {usage && (
+          <>
+            <dt>Input / output · 30 days</dt>
+            <dd>
+              {usage.inputTokens?.toLocaleString() ?? "Not reported"} /{" "}
+              {usage.outputTokens?.toLocaleString() ?? "Not reported"}
+            </dd>
+            <dt>Recorded calls · 30 days</dt>
+            <dd>{usage.calls}</dd>
+            <dt>AI credits · 30 days</dt>
+            <dd>{creditLabel(usage)}</dd>
+            <dt>Usage repository</dt>
+            <dd>{usage.repository ?? "Not reported"}</dd>
+          </>
+        )}
       </dl>
-      {agent.tokensUsed == null && (
+      {!usage && agent.tokensUsed == null && (
         <p className="detail-reason">
-          Token usage is unavailable from lifecycle hooks. This session has not supplied usage
-          telemetry.
+          No exact local-history identity match with recorded counts for this agent. Lifecycle hooks
+          do not supply counts; repository totals are never assigned to individual agents.
         </p>
       )}
       {agent.statusEvidence.length > 0 && (
@@ -690,8 +864,37 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 export function App() {
   const state = useOfficeStore();
   const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    void state.refreshUsage();
+    const timer = window.setInterval(() => void state.refreshUsage(), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const resetRef = useRef<(() => void) | null>(null);
   const zoomRef = useRef<((direction: number) => void) | null>(null);
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState("");
+  useEffect(() => {
+    const update = () => setFullscreen(document.fullscreenElement === sceneRef.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
+  const toggleFullscreen = async () => {
+    setFullscreenError("");
+    try {
+      if (document.fullscreenElement === sceneRef.current) {
+        await document.exitFullscreen();
+      } else {
+        if (!sceneRef.current?.requestFullscreen)
+          throw new Error("Fullscreen is not supported by this browser.");
+        await sceneRef.current.requestFullscreen();
+      }
+    } catch (error) {
+      setFullscreenError(
+        error instanceof Error ? error.message : "Could not change fullscreen mode.",
+      );
+    }
+  };
   const officeView = state.officeView;
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -702,7 +905,6 @@ export function App() {
   const [demoOpen, setDemoOpen] = useState(false);
   const [demoMessage, setDemoMessage] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [repositoryFilter, setRepositoryFilter] = useState("");
   useEffect(() => {
     void state.refresh();
   }, []);
@@ -735,19 +937,12 @@ export function App() {
   }, []);
 
   const filtered = useMemo(
-    () => filterAgents(state.agents, state.filter, state.query, repositoryFilter),
-    [state.agents, state.filter, state.query, repositoryFilter],
+    () => filterAgents(state.agents, state.filter, state.query),
+    [state.agents, state.filter, state.query],
   );
   const selectedAgent = state.agents.find((agent) => agent.id === state.selectedId);
   const desks = state.desks;
   const attention = attentionQueue(state.agents);
-  const repositories = [
-    ...new Set(
-      state.agents
-        .filter((agent) => agent.repositoryOwner && agent.repositoryName)
-        .map((agent) => `${agent.repositoryOwner}/${agent.repositoryName}`),
-    ),
-  ].sort();
 
   const refresh = async () => {
     setIsRefreshing(true);
@@ -780,7 +975,6 @@ export function App() {
     if (!filtered.some((agent) => agent.id === id)) {
       state.setFilter("all");
       state.setQuery("");
-      setRepositoryFilter("");
     }
     state.select(id);
   };
@@ -860,21 +1054,6 @@ export function App() {
           <div className="toolbar">
             <AgentFilterTabs value={state.filter} onChange={state.setFilter} />
             <div className="filter-tools">
-              <label className="repository-select">
-                <span className="sr-only">Filter by repository</span>
-                <select
-                  aria-label="Filter by repository"
-                  value={repositoryFilter}
-                  onChange={(event) => setRepositoryFilter(event.target.value)}
-                >
-                  <option value="">All repositories</option>
-                  {repositories.map((repository) => (
-                    <option key={repository} value={repository}>
-                      {repository}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <label className="search-box">
                 <Search size={15} />
                 <input
@@ -891,7 +1070,12 @@ export function App() {
               </label>
             </div>
           </div>
-          <div className={`scene-wrap ${state.listMode ? "list-view" : ""}`}>
+          <div ref={sceneRef} className={`scene-wrap ${state.listMode ? "list-view" : ""}`}>
+            {fullscreenError && (
+              <p className="fullscreen-error" role="alert">
+                {fullscreenError}
+              </p>
+            )}
             {state.listMode ? (
               <AgentList agents={filtered} onSelect={selectAgent} />
             ) : (
@@ -911,6 +1095,17 @@ export function App() {
                 resetRef={resetRef}
                 zoomRef={zoomRef}
               />
+            )}
+            {!state.listMode && (
+              <button
+                className="icon-button fullscreen-button"
+                title={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                aria-pressed={fullscreen}
+                onClick={() => void toggleFullscreen()}
+              >
+                {fullscreen ? <Minimize size={17} /> : <Maximize size={17} />}
+              </button>
             )}
             {!state.listMode && (
               <div className="scene-controls">
@@ -1069,7 +1264,9 @@ export function App() {
                     <AgentName agent={agent} />
                   </strong>
                   <small>{agent.repositoryName ?? "Unassigned"}</small>
-                  <small>Tokens used: {tokenUsageLabel(agent)}</small>
+                  <small>
+                    Tokens used: <AgentTokens agent={agent} />
+                  </small>
                   {agent.status === "offline" && <small>Away · {lastSeenLabel(agent)}</small>}
                 </span>
                 <span className="status-mini" style={{ background: statusColors[agent.status] }} />
@@ -1129,13 +1326,16 @@ export function App() {
           </div>
         </aside>
       </div>
-      {selectedAgent && (
-        <AgentDetails
-          key={selectedAgent.id}
-          agent={selectedAgent}
-          onClose={() => state.select(null)}
-        />
-      )}
+      {selectedAgent &&
+        createPortal(
+          <AgentDetails
+            key={selectedAgent.id}
+            agent={selectedAgent}
+            onClose={() => state.select(null)}
+          />,
+          // The browser only shows the fullscreen element, so the profile must render inside it.
+          fullscreen && sceneRef.current ? sceneRef.current : document.body,
+        )}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </main>
   );

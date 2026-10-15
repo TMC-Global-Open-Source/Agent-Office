@@ -24,6 +24,8 @@ const EnvSchema = z.object({
   ENABLE_DEMO_CONTROLS: z.string().default("true"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   COPILOT_USAGE_DB_PATH: z.string().min(1).optional(),
+  VSCODE_USAGE_TRACKING: z.enum(["true", "false"]).default("true"),
+  VSCODE_USER_DATA_PATH: z.string().min(1).optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
