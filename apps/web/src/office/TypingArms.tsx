@@ -43,6 +43,10 @@ function TypingArm({
     segment(upper.current, shoulder, elbow);
     segment(lower.current, elbow, wrist);
     hand.current?.position.copy(wrist);
+    if (hand.current) {
+      hand.current.rotation.x =
+        activity === "typing" && !reducedMotion ? -(target.y - 0.74) * 2.5 : 0;
+    }
     if (cup.current) {
       const sip = coffeeSip(id, clock.elapsedTime, reducedMotion);
       cup.current.visible =

@@ -122,6 +122,7 @@ Docker alternative: `docker compose up --build`; the database is persisted in th
 Status rules and limitations are detailed in [docs/status-rules.md](docs/status-rules.md). Mock statuses are deterministic demo fixtures/events. GitHub activity is inferred and includes evidence, timestamp, confidence, and a human-readable explanation. “Direct” status is reserved for provider data that explicitly provides the status; no GitHub session API is assumed.
 
 ## Security and troubleshooting
+
 Use the **Office view** selector on the floor to switch between Isometric, Front,
 Left, Right, and Top down. Pan and zoom work in every view; Reset camera restores
 the selected view. Front and side views look down at 45 degrees to keep the floor visible.
@@ -136,14 +137,65 @@ Completed status and history. Sessions already completed when the dashboard open
 go directly to the lounge if their celebration period has elapsed.
 Attention uses a repeating 8-second wave-and-scan sequence until its status changes.
 Neither animation extends the configured waiting/idle timeout or blocks new work.
+Typing uses alternating raised keystrokes, lateral hand travel, wrist motion, and a subtle
+upper-body rhythm, with brief pauses to look up at the screen.
 Watching-task agents have an animated monitor activity indicator (decorative, not measured
 task progress). Working desk agents occasionally lift their coffee cup for a sip;
 reduced-motion mode keeps the cup on the desk and the monitor indicator static.
+Every desk activity has a decorative monitor display: a dashboard, growing code,
+document reading highlight, search results, terminal output, delegation diagram,
+context folders, diagnostics, attention prompt, completion confirmation, screensaver,
+or standby. Displays never show actual prompts, code, or tool output. They refresh
+at up to 12 frames per second and remain static with reduced motion.
 The attention queue shows waiting time and sorts oldest requests first, using the
 hook's waiting-start timestamp when available, otherwise the agent update timestamp.
 Selecting an entry opens its profile; provider task links are available there.
 Local hooks do not expose reliable editor/terminal session links.
 Your view, zoom, pan, and display preferences are remembered in this browser.
+
+### Folder and agent token usage
+
+The usage panel includes **30-day folder totals** (the workspace folder name shown above
+each desk), with input/output counts, AI credits, sources, and session/call coverage.
+The repository is listed under a folder when Copilot CLI recorded it. Agent profiles, roster entries, and list rows show **30-day
+input + output totals** when an exact local-history session identity matches.
+These are two breakdowns of the same data: do not add agent totals to folder totals.
+Cache-token counters are not added to input/output, and unavailable counts remain
+**Not reported**, not zero.
+
+**AI credits** are shown alongside tokens for the 30-day total, each folder, each
+matched agent and the unattributed bucket. They come from the `total_nano_aiu` value
+Copilot records for each call (1 AI credit = 1,000,000,000 nano AI units), not from an
+estimate. A total is marked **(partial)** when some calls have no recorded value, and
+older databases without the column show **Not reported**.
+
+The adapter opens `~/.copilot/session-store.db` read-only (override with
+`COPILOT_USAGE_DB_PATH`), reading only usage counters, session identities, and repository
+metadata. It never reads conversations, prompts, or tool contents. Root sessions only
+receive root calls; a child's counters require both an exact child identity and a
+matching parent. Unknown children and sessions without an exact office match remain
+**Unattributed** to agents. Sessions without a recorded folder have their own
+**Folder not reported** bucket.
+
+**VS Code usage** is read from VS Code's local chat session logs
+(`%APPDATA%\Code\User\workspaceStorage\*\chatSessions\*.jsonl` on Windows, plus empty-window
+sessions). Only request timestamps, `promptTokens`, `completionTokens`, and `copilotCredits`
+are kept; prompts and responses are discarded while parsing. The folder comes from the
+workspace's `workspace.json`. A chat log's file name is the VS Code session ID, so usage
+is attributed to the matching VS Code desk exactly (subagent usage stays with the root
+agent). VS Code counts are **requests**, which may each contain several model calls.
+Set `VSCODE_USAGE_TRACKING=false` to disable this source, or `VSCODE_USER_DATA_PATH` to
+point at a different VS Code user-data folder (for example VS Code Insiders). The panel
+lists each source's totals separately. An incompatible database schema is reported explicitly.
+Usage refreshes every minute and does not overwrite hook-supplied token counters.
+
+Use **Enter fullscreen** in the office controls to expand only the office floor.
+View selection, pan, and zoom remain available; use **Exit fullscreen** or **Esc**
+to return to the dashboard.
+
+Select an agent to open its profile (also in fullscreen, where it docks on the left).
+Click anywhere outside the profile, or press **Esc**, to close it. The roster search and
+status filter narrow the agent list.
 
 If the production dashboard loads but the office stays blank, update and rebuild the
 server as well as the web app with `Build-Agent-Office.cmd`. The 3D text renderer requires blob workers/generated

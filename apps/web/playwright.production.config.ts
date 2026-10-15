@@ -17,6 +17,7 @@ export default defineConfig({
       HOST: "127.0.0.1",
       AGENT_PROVIDER: "mock",
       DATABASE_URL: "file:./production-test.db",
+      VSCODE_USAGE_TRACKING: "false",
       PORT: String(port),
     },
   },

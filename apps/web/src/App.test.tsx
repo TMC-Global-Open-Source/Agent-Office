@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import {
   AgentFilterTabs,
+  AgentDetails,
   AgentList,
   ConnectionStatus,
   StatusSummary,
   TokenUsageSummary,
+  UsageByFolder,
 } from "./App.js";
 import { filterAgents, useOfficeStore } from "./store.js";
 import type { Agent } from "@agent-office/shared";
@@ -36,6 +38,117 @@ const sample: Agent = {
 };
 
 describe("dashboard components", () => {
+  it("shows folder totals and unattributed usage as separate non-additive breakdowns", () => {
+    useOfficeStore.setState({
+      usage: {
+        available: true,
+        message: "Exact matches only",
+        since: "2026-09-14T00:00:00Z",
+        asOf: "2026-10-14T00:00:00Z",
+        agents: [],
+        sources: [
+          {
+            source: "vscode",
+            available: true,
+            message: "VS Code chat requests",
+            inputTokens: 200,
+            outputTokens: 50,
+            calls: 2,
+            aiCredits: 1,
+            aiCreditCalls: 2,
+          },
+        ],
+        folders: [
+          {
+            folder: "ConnectWise Main",
+            repositories: ["org/repo"],
+            sources: ["copilot-cli", "vscode"],
+            inputTokens: 500,
+            outputTokens: 100,
+            calls: 5,
+            sessions: 2,
+            aiCredits: 2.5,
+            aiCreditCalls: 5,
+          },
+        ],
+        unattributed: {
+          inputTokens: 500,
+          outputTokens: 100,
+          calls: 5,
+          aiCredits: 2.5,
+          aiCreditCalls: 5,
+        },
+      },
+      usageError: null,
+    });
+    const { unmount } = render(<UsageByFolder />);
+    expect(screen.getByText("By folder · 30 days")).toBeInTheDocument();
+    expect(screen.getByText("ConnectWise Main")).toBeInTheDocument();
+    expect(screen.getByText("Repository: org/repo")).toBeInTheDocument();
+    expect(screen.getByText(/Copilot CLI \+ VS Code/)).toBeInTheDocument();
+    expect(screen.getByText("VS Code: VS Code chat requests")).toBeInTheDocument();
+    expect(screen.getByText("600 tokens")).toBeInTheDocument();
+    expect(screen.getByText("AI credits: 2.5")).toBeInTheDocument();
+    expect(
+      screen.getByText("Unattributed to office agents: 600 tokens · AI credits: 2.5 · 5 calls."),
+    ).toBeInTheDocument();
+    unmount();
+    useOfficeStore.setState({ usage: null });
+  });
+  it("shows exact per-agent counts without assigning repository totals to other agents", () => {
+    useOfficeStore.setState({
+      usage: {
+        available: true,
+        message: "Exact matches only",
+        since: "2026-09-14T00:00:00Z",
+        asOf: "2026-10-14T00:00:00Z",
+        agents: [
+          {
+            agentId: sample.id,
+            folder: "repo",
+            repository: "org/repo",
+            inputTokens: 12,
+            outputTokens: 3,
+            calls: 1,
+            aiCredits: 0.5,
+            aiCreditCalls: 1,
+          },
+        ],
+        sources: [],
+        folders: [
+          {
+            folder: "repo",
+            repositories: ["org/repo"],
+            sources: ["copilot-cli"],
+            inputTokens: 500,
+            outputTokens: 100,
+            calls: 5,
+            sessions: 2,
+            aiCredits: 2.5,
+            aiCreditCalls: 5,
+          },
+        ],
+        unattributed: {
+          inputTokens: 488,
+          outputTokens: 97,
+          calls: 4,
+          aiCredits: 2,
+          aiCreditCalls: 4,
+        },
+      },
+    });
+    const { unmount } = render(
+      <AgentList
+        agents={[sample, { ...sample, id: "unmatched", displayName: "Other agent" }]}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText("Tokens used: 15 · 0.5 AI credits · 30 days")).toBeInTheDocument();
+    expect(screen.getByText("Tokens used: Not reported")).toBeInTheDocument();
+    expect(screen.queryByText("600")).not.toBeInTheDocument();
+    unmount();
+    useOfficeStore.setState({ usage: null });
+  });
   it("uses the source display setting in agent list names", () => {
     useOfficeStore.setState({ showAgentSource: false });
     render(
@@ -79,12 +192,47 @@ describe("dashboard components", () => {
             outputTokens: 0,
             calls: 3,
             callsWithTokenCounts: 2,
+            aiCredits: 7.25,
+            aiCreditCalls: 3,
+            sources: [
+              {
+                source: "copilot-cli",
+                available: true,
+                message: "CLI",
+                inputTokens: 12000,
+                outputTokens: 0,
+                calls: 1,
+                aiCredits: 5,
+                aiCreditCalls: 1,
+              },
+              {
+                source: "vscode",
+                available: false,
+                message: "Not found",
+                inputTokens: null,
+                outputTokens: null,
+                calls: 0,
+                aiCredits: null,
+                aiCreditCalls: 0,
+              },
+            ],
           },
         }),
       }),
     );
     render(<TokenUsageSummary agents={[sample]} />);
     expect(await screen.findByText((12345).toLocaleString())).toBeInTheDocument();
+    expect(screen.getByText("AI credits")).toBeInTheDocument();
+    expect(
+      screen.getByText((7.3).toLocaleString(undefined, { minimumFractionDigits: 1 })),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Copilot CLI")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `${(5).toLocaleString(undefined, { minimumFractionDigits: 1 })} AI credits · ${(12000).toLocaleString()} tokens · 1 calls`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Not available")).toBeInTheDocument();
     expect(screen.getByText("No token counts reported yet.")).toBeInTheDocument();
     const notes = screen.getByText("Source & coverage").closest("details");
     expect(notes).not.toHaveAttribute("open");
@@ -126,12 +274,42 @@ describe("dashboard components", () => {
     expect(onSelect).toHaveBeenCalledWith("demo");
   });
 
-  it("filters by state, repository, and case-insensitive search", () => {
+  it("closes the agent profile on an outside click or Escape, but not on drags or inside clicks", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) }),
+    );
+    const onClose = vi.fn();
+    render(
+      <>
+        <div data-testid="outside" />
+        <AgentDetails agent={sample} onClose={onClose} />
+      </>,
+    );
+    // jsdom has no PointerEvent; MouseEvents with pointer event names carry the coordinates.
+    const pointer = (target: Element, type: string, clientX: number) =>
+      act(() => {
+        target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX, clientY: 10 }));
+      });
+    const panel = screen.getByLabelText("Aria Chen details");
+    pointer(panel, "pointerdown", 1);
+    pointer(panel, "pointerup", 1);
+    expect(onClose).not.toHaveBeenCalled();
+    const outside = screen.getByTestId("outside");
+    pointer(outside, "pointerdown", 10);
+    pointer(outside, "pointerup", 80);
+    expect(onClose).not.toHaveBeenCalled();
+    pointer(outside, "pointerdown", 10);
+    pointer(outside, "pointerup", 11);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("filters by state and case-insensitive search", () => {
     expect(filterAgents([sample], "working", "ARIA")).toHaveLength(1);
     expect(filterAgents([sample], "idle", "agent-office")).toHaveLength(0);
     expect(filterAgents([sample], "all", "sample-org")).toHaveLength(1);
-    expect(filterAgents([sample], "all", "", "sample-org/agent-office")).toHaveLength(1);
-    expect(filterAgents([sample], "all", "", "other/repo")).toHaveLength(0);
   });
 
   it("provides accessible filter and disconnected controls", () => {

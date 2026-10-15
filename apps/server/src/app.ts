@@ -22,6 +22,13 @@ import { LocalHooksProvider } from "./providers/local-hooks.js";
 import type { AgentProvider } from "./providers/types.js";
 import { randomAvatarColor } from "./avatar-color.js";
 import { readUsageHistory } from "./usage-history.js";
+import { readUsageAttribution } from "./usage-attribution.js";
+import { defaultVsCodeUserDataPath } from "./vscode-usage.js";
+
+function vscodeUsagePath(): string | null {
+  if (env.VSCODE_USAGE_TRACKING === "false") return null;
+  return env.VSCODE_USER_DATA_PATH ?? defaultVsCodeUserDataPath();
+}
 
 export const prisma = new PrismaClient();
 export const mockProvider = new MockAgentProvider();
@@ -394,9 +401,25 @@ app.get("/api/v1/health", async (_request, response, next) => {
 app.get("/api/v1/config", (_request, response) => {
   response.json({ data: config });
 });
+app.get("/api/v1/usage/attribution", async (_request, response, next) => {
+  try {
+    response.json({
+      data: readUsageAttribution(
+        await getStoredAgents(),
+        env.COPILOT_USAGE_DB_PATH,
+        undefined,
+        vscodeUsagePath(),
+      ),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 app.get("/api/v1/usage/history", (_request, response, next) => {
   try {
-    response.json({ data: readUsageHistory(env.COPILOT_USAGE_DB_PATH) });
+    response.json({
+      data: readUsageHistory(env.COPILOT_USAGE_DB_PATH, undefined, vscodeUsagePath()),
+    });
   } catch (error) {
     next(error);
   }

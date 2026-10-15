@@ -80,11 +80,49 @@ This does **not** require Copilot Cost Lens to be installed or running. Set
 `COPILOT_USAGE_DB_PATH` to override the local source path. The `/api/v1/usage/history`
 endpoint returns totals and daily aggregates; the dashboard refreshes it every minute.
 
-Only timestamp and token-count columns are read; no conversation content is returned.
+The history endpoint reads timestamp and token-count columns; no conversation content is returned.
 This local database schema is not a public telemetry contract: incompatible versions
 show an unavailable message. Missing counts stay unknown, and coverage is shown as
 calls with counts versus recorded calls. These history totals cover the local database,
-not necessarily every VS Code or CLI session, and are not attributed to live agents.
+not necessarily every VS Code or CLI session.
+
+`/api/v1/usage/attribution` additionally joins usage rows to `sessions.repository` and
+`sessions.cwd` by exact `session_id` and groups the same 30-day counters by workspace
+folder name (the desk label), listing known repositories per folder. It hashes the
+database session/child identity using the same CLI namespace as the hook bridge and
+matches only existing local CLI agents. Root totals exclude child calls. Child totals
+require a matching child ID and hashed parent; unknown identities are not inferred
+from workspace names or allocated a share of a folder total.
+Raw session IDs and parent tool-call IDs are never returned.
+
+The UI shows the verified 30-day input/output totals separately from hook-supplied
+cumulative `tokensUsed`. Folder totals include sessions not present in the office;
+those calls are **Unattributed** to agents. Missing folder metadata gets its own
+bucket. Both breakdowns count each usage row once, but must not be added together.
+Cache-token counters are not added to input/output. Missing databases, incompatible
+schemas, and query errors are surfaced rather than converted to zero.
+
+When present, `total_nano_aiu` is summed and divided by 1,000,000,000 to report recorded
+AI credits (`aiCredits`) with `aiCreditCalls` coverage in both endpoints. The column is
+optional: without it, credits are `null` (**Not reported**) and token reporting still works.
+
+## VS Code usage
+
+Both usage endpoints also read VS Code's local chat session logs read-only:
+`<user data>/workspaceStorage/*/chatSessions/*.jsonl` and
+`<user data>/globalStorage/emptyWindowChatSessions/*.jsonl` (no folder). The user-data
+folder defaults to `%APPDATA%\Code\User` (Windows), `~/Library/Application Support/Code/User`
+(macOS) or `~/.config/Code/User` (Linux); override it with `VSCODE_USER_DATA_PATH`, or set
+`VSCODE_USAGE_TRACKING=false` to disable the source. Each log is an append-only operation
+log that is replayed in memory; only each request's `timestamp`, `promptTokens`,
+`completionTokens`, and `copilotCredits` are retained. Logs older than the window are
+skipped by modification time, and parsed results are cached by path/mtime/size.
+
+The log file name is the VS Code chat session ID, which equals the hook `sessionId`, so a
+session's usage is attributed to the VS Code root agent with that exact hashed identity.
+Subagent usage is not separable and stays with the root agent. Counts are per chat
+request (one request may span several model calls). Both endpoints return a `sources`
+array with per-source totals and availability; VS Code remote/cloud sessions are not covered.
 
 ## Supported hook references
 

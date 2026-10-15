@@ -80,6 +80,48 @@ export const ConfigSchema = z.object({
 });
 export type AppConfig = z.infer<typeof ConfigSchema>;
 
+export interface TokenCounts {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  calls: number;
+  /** Recorded Copilot AI credits (1 credit = 1,000,000,000 nano AI units); null if not recorded. */
+  aiCredits: number | null;
+  aiCreditCalls: number;
+}
+
+export type UsageSourceId = "copilot-cli" | "vscode";
+
+export interface UsageSourceStatus extends TokenCounts {
+  source: UsageSourceId;
+  available: boolean;
+  message: string;
+}
+
+export interface AgentTokenUsage extends TokenCounts {
+  agentId: string;
+  folder: string | null;
+  repository: string | null;
+}
+
+export interface FolderUsage extends TokenCounts {
+  /** Workspace folder name; the same name shown above office desks. */
+  folder: string | null;
+  repositories: string[];
+  sources: UsageSourceId[];
+  sessions: number;
+}
+
+export interface UsageAttribution {
+  available: boolean;
+  message: string;
+  since: string;
+  asOf: string;
+  folders: FolderUsage[];
+  agents: AgentTokenUsage[];
+  unattributed: TokenCounts;
+  sources: UsageSourceStatus[];
+}
+
 export interface UsageHistory {
   available: boolean;
   message: string;
@@ -91,6 +133,9 @@ export interface UsageHistory {
   outputTokens: number | null;
   calls: number;
   callsWithTokenCounts: number;
+  aiCredits: number | null;
+  aiCreditCalls: number;
+  sources: UsageSourceStatus[];
   daily: Array<{
     date: string;
     inputTokens: number | null;

@@ -81,6 +81,55 @@ test("built office renders under the production security policy", async ({ page 
   }
   expect(screenshots.size).toBe(5);
   expect(errors).toEqual([]);
+  const floorBounds = await page.locator(".scene-wrap").boundingBox();
+  const buttonBounds = await page
+    .getByRole("button", { name: "Enter fullscreen", exact: true })
+    .boundingBox();
+  expect(floorBounds).not.toBeNull();
+  expect(buttonBounds).not.toBeNull();
+  expect(
+    Math.abs(floorBounds!.x + floorBounds!.width - buttonBounds!.x - buttonBounds!.width - 14),
+  ).toBeLessThan(2);
+  expect(
+    Math.abs(floorBounds!.y + floorBounds!.height - buttonBounds!.y - buttonBounds!.height - 14),
+  ).toBeLessThan(2);
+  await page.getByRole("button", { name: "Enter fullscreen", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => document.fullscreenElement?.classList.contains("scene-wrap")))
+    .toBe(true);
+  await expect(page.getByRole("combobox", { name: "Office view" })).toBeVisible();
+  const fullscreenBounds = await page.locator(".scene-wrap").boundingBox();
+  expect(fullscreenBounds?.width).toBe(page.viewportSize()?.width);
+  expect(fullscreenBounds?.height).toBe(page.viewportSize()?.height);
+  await page.getByRole("button", { name: "Exit fullscreen", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(page.getByRole("combobox", { name: "Filter by repository" })).toHaveCount(0);
+  await page.locator(".roster-item").first().click();
+  const profile = page.locator(".detail-panel");
+  await expect(profile).toBeVisible();
+  // The docked profile covers the windowed button; scene clicks open profiles in real use.
+  await page.evaluate(() =>
+    document.querySelector<HTMLButtonElement>(".fullscreen-button")?.click(),
+  );
+  await expect
+    .poll(() => page.evaluate(() => document.fullscreenElement?.classList.contains("scene-wrap")))
+    .toBe(true);
+  await expect(profile).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => !!document.fullscreenElement?.contains(document.querySelector(".detail-panel")),
+    ),
+  ).toBe(true);
+  expect((await profile.boundingBox())?.x).toBe(0);
+  await expect(page.getByRole("button", { name: "Exit fullscreen", exact: true })).toBeVisible();
+  await page.mouse.click(page.viewportSize()!.width - 120, 12);
+  await expect(profile).toHaveCount(0);
+  await page.getByRole("button", { name: "Exit fullscreen", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await page.locator(".roster-item").first().click();
+  await expect(profile).toBeVisible();
+  await page.locator(".welcome-row h1").click();
+  await expect(profile).toHaveCount(0);
   await page.getByRole("button", { name: "Zoom in", exact: true }).click();
   const savedCamera = await page.evaluate(
     () => JSON.parse(localStorage.getItem("agent-office-display") ?? "{}").state.cameraState,
@@ -101,4 +150,15 @@ test("built office renders under the production security policy", async ({ page 
   await page.reload();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Show agent source" })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Group desks by repository" })).toHaveCount(0);
+  const attribution = await page.request.get("/api/v1/usage/attribution");
+  expect(attribution.ok()).toBe(true);
+  const { data } = await attribution.json();
+  expect(Array.isArray(data.folders)).toBe(true);
+  expect(data.sources.map((source: { source: string }) => source.source)).toEqual([
+    "copilot-cli",
+    "vscode",
+  ]);
+  expect(Array.isArray(data.agents)).toBe(true);
+  expect(data).toHaveProperty("unattributed.calls");
 });

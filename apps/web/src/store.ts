@@ -13,6 +13,7 @@ import {
   type AgentState,
   type AppConfig,
   type ProviderHealth,
+  type UsageAttribution,
 } from "@agent-office/shared";
 
 const api = "/api/v1";
@@ -26,6 +27,9 @@ export interface Desk {
 }
 
 interface OfficeStore {
+  usage: UsageAttribution | null;
+  usageError: string | null;
+  refreshUsage: () => Promise<void>;
   officeView: OfficeView;
   cameraState: CameraState | null;
   setOfficeView: (view: OfficeView) => void;
@@ -74,6 +78,21 @@ interface OfficeStore {
 export const useOfficeStore = create<OfficeStore>()(
   persist(
     (set) => ({
+      usage: null,
+      usageError: null,
+      refreshUsage: async () => {
+        try {
+          const response = await fetch(`${api}/usage/attribution`);
+          if (!response.ok) throw new Error("Token attribution could not be loaded.");
+          const result = (await response.json()) as { data: UsageAttribution };
+          set({ usage: result.data, usageError: null });
+        } catch (error) {
+          set({
+            usageError:
+              error instanceof Error ? error.message : "Token attribution could not be loaded.",
+          });
+        }
+      },
       officeView: "isometric",
       cameraState: null,
       setOfficeView: (officeView) => set({ officeView, cameraState: null }),
@@ -173,20 +192,13 @@ export const statusLabels: Record<AgentState, string> = {
   offline: "Offline",
 };
 
-export function filterAgents(
-  agents: Agent[],
-  filter: AgentState | "all",
-  query: string,
-  repository = "",
-): Agent[] {
+export function filterAgents(agents: Agent[], filter: AgentState | "all", query: string): Agent[] {
   const normalizedQuery = query.toLowerCase();
   return agents.filter((agent) => {
     const matchesStatus = filter === "all" || filter === agent.status;
-    const fullRepository = `${agent.repositoryOwner ?? ""}/${agent.repositoryName ?? ""}`;
-    const matchesRepository = !repository || fullRepository === repository;
     const searchable =
       `${agent.displayName} ${agent.repositoryOwner ?? ""}/${agent.repositoryName ?? ""} ${agent.taskTitle ?? ""}`.toLowerCase();
-    return matchesStatus && matchesRepository && searchable.includes(normalizedQuery);
+    return matchesStatus && searchable.includes(normalizedQuery);
   });
 }
 

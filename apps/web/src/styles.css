@@ -308,16 +308,61 @@ h1 {
 .scene-wrap canvas {
   display: block;
 }
+.scene-wrap:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+/* In fullscreen the profile docks left so the camera and fullscreen controls stay reachable. */
+.scene-wrap:fullscreen .detail-panel {
+  left: 0;
+  right: auto;
+  border-left: 0;
+  border-right: 1px solid #e3e8e1;
+  box-shadow: 16px 0 50px #163c3b20;
+}
+.fullscreen-error {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2;
+  max-width: calc(100% - 90px);
+  padding: 10px;
+  background: var(--cp-surface);
+  color: var(--cp-text);
+  border: 1px solid var(--cp-border);
+  border-radius: 0.625rem;
+}
 .scene-controls {
   position: absolute;
   right: 13px;
   top: 13px;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
 }
-.scene-controls .icon-button {
-  background: #fffffff2;
+/* Floating office controls stay see-through until hovered or focused. */
+.scene-controls .icon-button,
+.fullscreen-button {
+  background: transparent;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.scene-controls .icon-button:hover,
+.scene-controls .icon-button:focus-visible,
+.fullscreen-button:hover,
+.fullscreen-button:focus-visible {
+  background: #f0f5f2;
+  color: #164d55;
+}
+.fullscreen-button {
+  position: absolute;
+  right: 13px;
+  bottom: 13px;
 }
 .office-view-select {
   max-width: 120px;
@@ -698,6 +743,41 @@ h1 {
 }
 .usage-live p {
   margin-bottom: 0;
+}
+.usage-repositories {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--cp-border);
+}
+.repository-usage-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.repository-usage-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--cp-border);
+  overflow-wrap: anywhere;
+}
+.repository-usage-row small {
+  color: var(--cp-text-muted);
+}
+.usage-sources {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.usage-sources li {
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.usage-sources span {
+  color: var(--cp-text-muted);
+  font-size: 0.86em;
 }
 .agent-color-settings {
   display: flex;

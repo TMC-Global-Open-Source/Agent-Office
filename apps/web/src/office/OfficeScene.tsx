@@ -305,7 +305,10 @@ export function OfficeScene(props: {
 }) {
   const showSource = useOfficeStore((state) => state.showAgentSource);
   const displayAgents = (agents: Agent[]) =>
-    agents.map((agent) => ({ ...agent, displayName: agentDisplayName(agent, showSource) }));
+    agents.map((agent) => ({
+      ...agent,
+      displayName: agentDisplayName(agent, showSource),
+    }));
   return (
     <Canvas
       orthographic
