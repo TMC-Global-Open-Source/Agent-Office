@@ -147,6 +147,26 @@ describe("Agent Office API", () => {
     expect((await prisma.desk.findUnique({ where: { agentId: "demo-theo" } }))?.active).toBe(true);
   });
 
+  it("consolidates remaining desks into the top-left slots after a desk is removed", async () => {
+    await syncAgents();
+    const before = await prisma.desk.findMany({ orderBy: [{ row: "asc" }, { column: "asc" }] });
+    const theo = before.find((desk) => desk.agentId === "demo-theo")!;
+    expect(before.at(-1)?.id).not.toBe(theo.id);
+    await request(app).post("/api/v1/demo/events/agent-offline").expect(200);
+    await prisma.desk.update({
+      where: { agentId: "demo-theo" },
+      data: { reservedUntil: new Date(Date.now() - 1000) },
+    });
+    await syncAgents();
+    const after = await prisma.desk.findMany({ orderBy: [{ row: "asc" }, { column: "asc" }] });
+    expect(after.map((desk) => desk.agentId)).toEqual(
+      before.filter((desk) => desk.id !== theo.id).map((desk) => desk.agentId),
+    );
+    after.forEach((desk, index) => {
+      expect([desk.row, desk.column]).toEqual([Math.floor(index / 5), index % 5]);
+    });
+  });
+
   it("saves joining colors and preserves them instead of using provider colors on refresh", async () => {
     const initial = await syncAgents();
     for (const agent of initial) expect(agent.avatarColor).toMatch(/^#[0-9a-f]{6}$/);

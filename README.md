@@ -151,6 +151,9 @@ Completed status and history. Sessions already completed when the dashboard open
 go directly to the lounge if their celebration period has elapsed. Lounge agents
 occasionally take a break at the arcade cabinet or pinball table (labelled "Playing
 arcade" / "Playing pinball"); reduced motion disables these breaks.
+When a local agent's pull request is merged, it parties at its desk for 14 seconds (jump,
+wave, floss, confetti); this needs the GitHub CLI signed in (`gh auth login`). See
+[docs/local-copilot-hooks.md](docs/local-copilot-hooks.md#pull-request-merge-party).
 Attention uses a repeating 8-second wave-and-scan sequence until its status changes.
 Neither animation extends the configured waiting/idle timeout or blocks new work.
 Typing uses alternating raised keystrokes, lateral hand travel, wrist motion, and a subtle

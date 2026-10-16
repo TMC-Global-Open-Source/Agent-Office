@@ -26,6 +26,7 @@ const EnvSchema = z.object({
   COPILOT_USAGE_DB_PATH: z.string().min(1).optional(),
   VSCODE_USAGE_TRACKING: z.enum(["true", "false"]).default("true"),
   VSCODE_USER_DATA_PATH: z.string().min(1).optional(),
+  PR_WATCH_INTERVAL_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

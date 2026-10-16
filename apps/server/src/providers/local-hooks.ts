@@ -15,6 +15,15 @@ import {
 } from "@agent-office/shared";
 import { z } from "zod";
 import type { AgentProvider } from "./types.js";
+import {
+  GhUnavailableError,
+  nextPullRequestMetadata,
+  readPullRequestMetadata,
+  type PullRequestLookup,
+} from "./pull-request-watch.js";
+
+const pullRequestEvents = new Set(["postToolUse", "agentStop", "sessionEnd"]);
+const minimumPullRequestGapMs = 15_000;
 
 const LocalHookEventSchema = z.object({
   event: z.enum([
@@ -39,6 +48,8 @@ const LocalHookEventSchema = z.object({
   subagentId: z.string().max(256).optional(),
   subagentType: z.string().max(128).optional(),
   toolName: z.string().max(128).optional(),
+  /** Session folder; kept in server memory only so `gh` can look up the branch's pull request. */
+  cwd: z.string().max(1024).optional(),
 });
 export type LocalHookEvent = z.infer<typeof LocalHookEventSchema>;
 
@@ -84,6 +95,128 @@ export class LocalHooksProvider implements AgentProvider {
   private offlineThresholdMinutes = 60;
   private idleDelaySeconds = 20;
   private lastEventAt: string | null = null;
+  private readonly workspacePaths = new Map<string, string>();
+  private readonly pullRequestDue = new Map<string, number>();
+  private readonly pullRequestCheckedAt = new Map<string, number>();
+  private pullRequestLookup: PullRequestLookup | null = null;
+  private pullRequestIntervalMs = 60_000;
+  private pullRequestTimer: ReturnType<typeof setTimeout> | null = null;
+  private pullRequestRun: Promise<boolean> | null = null;
+  /** Called after a background pull request check changes an agent. */
+  onPullRequestChange: (() => void) | null = null;
+
+  /** Enables merge detection; pass null or a zero interval to disable it. */
+  watchPullRequests(lookup: PullRequestLookup | null, intervalSeconds: number): void {
+    this.pullRequestLookup = intervalSeconds > 0 ? lookup : null;
+    this.pullRequestIntervalMs = intervalSeconds * 1000;
+    if (!this.pullRequestLookup && this.pullRequestTimer) {
+      clearTimeout(this.pullRequestTimer);
+      this.pullRequestTimer = null;
+    }
+  }
+
+  private schedulePullRequestCheck(agentId: string, delayMs: number): void {
+    if (!this.pullRequestLookup || !this.workspacePaths.has(agentId)) return;
+    const checkedAt = this.pullRequestCheckedAt.get(agentId) ?? -Infinity;
+    const due = Math.max(Date.now() + delayMs, checkedAt + minimumPullRequestGapMs);
+    this.pullRequestDue.set(agentId, Math.min(this.pullRequestDue.get(agentId) ?? due, due));
+    this.armPullRequestTimer();
+  }
+
+  private armPullRequestTimer(): void {
+    if (this.pullRequestTimer) clearTimeout(this.pullRequestTimer);
+    this.pullRequestTimer = null;
+    if (!this.pullRequestLookup || !this.pullRequestDue.size) return;
+    const next = Math.min(...this.pullRequestDue.values());
+    this.pullRequestTimer = setTimeout(
+      () => {
+        this.pullRequestTimer = null;
+        void this.checkPullRequests().then((changed) => {
+          if (changed) this.onPullRequestChange?.();
+          this.armPullRequestTimer();
+        });
+      },
+      Math.max(0, next - Date.now()),
+    );
+    this.pullRequestTimer.unref?.();
+  }
+
+  /** Looks up due agents' branch pull requests; resolves true when any agent changed. */
+  checkPullRequests(now = Date.now()): Promise<boolean> {
+    if (this.pullRequestRun) return this.pullRequestRun;
+    const run = this.runPullRequestChecks(now).finally(() => {
+      if (this.pullRequestRun === run) this.pullRequestRun = null;
+    });
+    this.pullRequestRun = run;
+    return run;
+  }
+
+  private async runPullRequestChecks(now: number): Promise<boolean> {
+    const lookup = this.pullRequestLookup;
+    if (!lookup) return false;
+    let changed = false;
+    for (const [id, cwd] of this.workspacePaths) {
+      const agent = this.agents.get(id);
+      if (!agent || agent.status === "offline") {
+        this.pullRequestDue.delete(id);
+        continue;
+      }
+      const due = this.pullRequestDue.get(id) ?? 0;
+      if (due > now) continue;
+      this.pullRequestDue.set(id, now + this.pullRequestIntervalMs);
+      this.pullRequestCheckedAt.set(id, now);
+      let info;
+      try {
+        info = await lookup(cwd);
+      } catch (error) {
+        if (error instanceof GhUnavailableError) {
+          console.warn(`${error.message} Pull request merge celebrations are disabled.`);
+          this.pullRequestLookup = null;
+          return changed;
+        }
+        continue;
+      }
+      if (!info) continue;
+      const current = this.agents.get(id);
+      if (!current) continue;
+      const previous = readPullRequestMetadata(current.metadata.pullRequest);
+      const pullRequest = nextPullRequestMetadata(previous, info, Date.now());
+      if (
+        previous &&
+        previous.number === pullRequest.number &&
+        previous.state === pullRequest.state &&
+        previous.url === pullRequest.url &&
+        previous.celebrationAt === pullRequest.celebrationAt
+      )
+        continue;
+      const observedAt = new Date().toISOString();
+      const summary =
+        pullRequest.state === "MERGED"
+          ? `Pull request #${pullRequest.number} merged.`
+          : pullRequest.state === "OPEN"
+            ? `Pull request #${pullRequest.number} is open.`
+            : `Pull request #${pullRequest.number} closed.`;
+      this.agents.set(id, {
+        ...current,
+        pullRequestNumber: pullRequest.number,
+        taskUrl: pullRequest.url ?? current.taskUrl,
+        metadata: { ...current.metadata, pullRequest },
+        updatedAt: observedAt,
+      });
+      const items = this.activity.get(id) ?? [];
+      items.unshift({
+        id: `${id}:pull-request:${pullRequest.number}:${pullRequest.state}`,
+        agentId: id,
+        kind: "pull-request",
+        summary,
+        occurredAt: observedAt,
+        url: pullRequest.url,
+      });
+      this.activity.set(id, items.slice(0, 50));
+      changed = true;
+    }
+    return changed;
+  }
 
   health(): ProviderHealth {
     return {
@@ -181,9 +314,9 @@ export class LocalHooksProvider implements AgentProvider {
       repositoryOwner: null,
       repositoryName: event.workspace,
       issueNumber: null,
-      pullRequestNumber: null,
+      pullRequestNumber: prior?.pullRequestNumber ?? null,
       taskTitle: "Local Copilot session",
-      taskUrl: null,
+      taskUrl: prior?.taskUrl ?? null,
       status,
       statusReason: reason,
       statusEvidence: [
@@ -208,6 +341,7 @@ export class LocalHooksProvider implements AgentProvider {
         subagent: Boolean(event.subagentId),
         ...(event.subagentId ? { parentAgentId: parentId } : {}),
         officeActivity: activity,
+        ...(prior?.metadata.pullRequest ? { pullRequest: prior.metadata.pullRequest } : {}),
         ...(transient ? { activityUntil: new Date(Date.now() + 5000).toISOString() } : {}),
         ...(awaitingPrompt
           ? {
@@ -232,6 +366,12 @@ export class LocalHooksProvider implements AgentProvider {
     });
     this.activity.set(id, items.slice(0, 50));
     this.lastEventAt = observedAt;
+    if (!event.subagentId && event.cwd) {
+      const known = this.workspacePaths.has(id);
+      this.workspacePaths.set(id, event.cwd);
+      if (!known) this.schedulePullRequestCheck(id, 2000);
+      else if (pullRequestEvents.has(event.event)) this.schedulePullRequestCheck(id, 4000);
+    }
     return agent;
   }
 

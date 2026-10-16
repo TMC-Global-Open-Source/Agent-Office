@@ -1,11 +1,91 @@
-import { memo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import { Line, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { arcadeInput, machinePositions, machineRotation, pinballFlips } from "./game-room.js";
 
 const invaderColumns = [-0.16, -0.08, 0, 0.08, 0.16];
 const invaderRows = [0.12, 0.06];
+
+/** Classic upright side profile as (z, y): kick-out control panel, recessed screen, marquee hood. */
+const cabinetProfile: Array<[number, number]> = [
+  [-0.37, 0],
+  [0.38, 0],
+  [0.38, 0.98],
+  [0.45, 1.04],
+  [0.41, 1.16],
+  [0.17, 1.24],
+  [0.12, 1.86],
+  [0.19, 1.9],
+  [0.19, 2.13],
+  [-0.2, 2.13],
+  [-0.37, 1.95],
+];
+const sideThickness = 0.035;
+const sideX = 0.415;
+const stripeAngle = (50 * Math.PI) / 180;
+const sideStripes: Array<[number, string]> = [
+  [-0.12, "#ff3e9a"],
+  [0.0, "#ff9f1c"],
+  [0.12, "#22d3ee"],
+];
+const sideInvader = ["00100100", "00111100", "01011010", "11111111", "10111101", "10100101"];
+
+function CabinetSide({ side }: { side: 1 | -1 }) {
+  const geometry = useMemo(() => {
+    const shape = new THREE.Shape(cabinetProfile.map(([z, y]) => new THREE.Vector2(z, y)));
+    return new THREE.ExtrudeGeometry(shape, { depth: sideThickness, bevelEnabled: false });
+  }, []);
+  const trim = useMemo(
+    () =>
+      [...cabinetProfile, cabinetProfile[0]!].map(
+        ([z, y]) => [0, y, z] as [number, number, number],
+      ),
+    [],
+  );
+  const face = side * (sideX + sideThickness + 0.002);
+  // Art planes face outward; their local x runs toward the back on the right side and the front on the left.
+  const u = (z: number) => (side === 1 ? -z : z);
+  return (
+    <group>
+      <mesh
+        geometry={geometry}
+        position={[side === 1 ? sideX + sideThickness : -sideX, 0, 0]}
+        rotation={[0, -Math.PI / 2, 0]}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial color="#14121c" roughness={0.55} />
+      </mesh>
+      <Line points={trim} position={[face, 0, 0]} color="#22d3ee" lineWidth={2} />
+      <group position={[face, 0, 0]} rotation={[0, (side * Math.PI) / 2, 0]}>
+        {sideStripes.map(([z, color]) => (
+          <mesh
+            key={color}
+            position={[u(z), 0.56, 0]}
+            rotation={[0, 0, side === 1 ? Math.PI - stripeAngle : stripeAngle]}
+          >
+            <planeGeometry args={[0.72, 0.055]} />
+            <meshBasicMaterial color={color} />
+          </mesh>
+        ))}
+        {sideInvader.flatMap((row, y) =>
+          [...row].map((bit, x) =>
+            bit === "1" ? (
+              <mesh
+                key={`${x}:${y}`}
+                position={[u(-0.12 + (x - 3.5) * 0.028), 1.68 - y * 0.028, 0]}
+              >
+                <planeGeometry args={[0.026, 0.026]} />
+                <meshBasicMaterial color="#c084fc" />
+              </mesh>
+            ) : null,
+          ),
+        )}
+      </group>
+    </group>
+  );
+}
 
 function ArcadeCabinet({ playing, reducedMotion }: { playing: boolean; reducedMotion: boolean }) {
   const invaders = useRef<THREE.Group>(null);
@@ -54,16 +134,26 @@ function ArcadeCabinet({ playing, reducedMotion }: { playing: boolean; reducedMo
     <group position={machinePositions.arcade} rotation={[0, machineRotation, 0]}>
       <mesh position={[0, 0.53, 0]} castShadow receiveShadow>
         <boxGeometry args={[0.82, 1.06, 0.72]} />
-        <meshStandardMaterial color="#2e3f58" roughness={0.75} />
+        <meshStandardMaterial color="#1f1b2e" roughness={0.6} />
       </mesh>
       <mesh position={[0, 1.47, -0.12]} castShadow>
         <boxGeometry args={[0.82, 0.86, 0.48]} />
-        <meshStandardMaterial color="#2e3f58" roughness={0.75} />
+        <meshStandardMaterial color="#1f1b2e" roughness={0.6} />
       </mesh>
-      {[-0.42, 0.42].map((x) => (
-        <mesh key={x} position={[x, 1.0, 0]}>
-          <boxGeometry args={[0.02, 1.9, 0.74]} />
-          <meshStandardMaterial color="#b11f4b" roughness={0.6} />
+      <CabinetSide side={1} />
+      <CabinetSide side={-1} />
+      <mesh position={[0, 0.06, 0.365]}>
+        <boxGeometry args={[0.8, 0.12, 0.012]} />
+        <meshStandardMaterial color="#c9ced6" metalness={0.7} roughness={0.3} />
+      </mesh>
+      <mesh position={[0, 0.48, 0.366]}>
+        <boxGeometry args={[0.34, 0.34, 0.012]} />
+        <meshStandardMaterial color="#2a2a33" metalness={0.5} roughness={0.45} />
+      </mesh>
+      {[-0.07, 0.07].map((x) => (
+        <mesh key={x} position={[x, 0.53, 0.374]}>
+          <boxGeometry args={[0.05, 0.08, 0.008]} />
+          <meshStandardMaterial color="#ff9f1c" emissive="#ff7a00" emissiveIntensity={0.9} />
         </mesh>
       ))}
       <mesh position={[0, 1.08, 0.24]} rotation={[0.35, 0, 0]} castShadow>

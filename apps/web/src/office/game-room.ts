@@ -16,16 +16,16 @@ export interface GameRoomState {
   nextAt: Record<GameMachine, number | null>;
 }
 
-/** The game corner sits left of the lounge; machines face +x toward the desks. */
+/** The game corner sits in the back-left corner, left of the lounge; machines face +x toward the desks. */
 export const machinePositions: Record<GameMachine, [number, number, number]> = {
-  arcade: [-8.0, 0, -2.4],
-  pinball: [-8.1, 0, -4.4],
+  arcade: [-8.0, 0, -5.9],
+  pinball: [-8.1, 0, -7.8],
 };
 export const machineRotation = Math.PI / 2;
 export const playerRotation = -Math.PI / 2;
 export const gameStandingPositions: Record<GameMachine, [number, number, number]> = {
-  arcade: [-7.25, 0, -2.4],
-  pinball: [-6.9, 0, -4.4],
+  arcade: [-7.25, 0, -5.9],
+  pinball: [-6.9, 0, -7.8],
 };
 const walkSpeed = 1.5;
 const laneX = -6.45;

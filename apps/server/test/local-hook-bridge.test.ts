@@ -39,7 +39,7 @@ it("forwards tool names and child identity through the installed bridge without 
         agent_type: "research",
         hook_event_name: "PreToolUse",
         timestamp: new Date().toISOString(),
-        cwd: "C:\\private\\project",
+        cwd: "C:\\work\\project",
         tool_name: "Read",
         prompt: "private",
         tool_input: { content: "private" },
@@ -57,6 +57,7 @@ it("forwards tool names and child identity through the installed bridge without 
       toolName: "Read",
       subagentId: "child",
       subagentType: "research",
+      cwd: "C:\\work\\project",
     });
     expect(JSON.stringify(received)).not.toContain("private");
   } finally {

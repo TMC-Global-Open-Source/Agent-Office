@@ -8,6 +8,7 @@ import { TypingArms } from "./TypingArms.js";
 import { activityPose } from "./activity-animation.js";
 import { statusPose } from "./status-animation.js";
 import { arcadeInput, pinballFlips, type GameMachine } from "./game-room.js";
+import { partyElapsed, partyPose } from "./party-animation.js";
 
 export function AgentAvatar({
   agent,
@@ -18,6 +19,7 @@ export function AgentAvatar({
   walking = false,
   drinkingWater = false,
   playing = null,
+  partying = false,
 }: {
   agent: Agent;
   selected: boolean;
@@ -27,6 +29,7 @@ export function AgentAvatar({
   walking?: boolean;
   drinkingWater?: boolean;
   playing?: GameMachine | null;
+  partying?: boolean;
 }) {
   const root = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
@@ -36,8 +39,9 @@ export function AgentAvatar({
   const leftFoot = useRef<THREE.Group>(null);
   const rightFoot = useRef<THREE.Group>(null);
   const offline = agent.status === "offline";
-  const isRelaxing = relaxing && (agent.status === "idle" || agent.status === "completed");
-  const isWorking = agent.status === "working";
+  const isRelaxing =
+    !partying && relaxing && (agent.status === "idle" || agent.status === "completed");
+  const isWorking = !partying && agent.status === "working";
   const activity = getOfficeActivity(agent);
   const idleVariant = loungeVariant ?? loungePersonality(agent.id).variant;
 
@@ -57,6 +61,20 @@ export function AgentAvatar({
     }
     if (leftFoot.current) leftFoot.current.rotation.x = 0;
     if (rightFoot.current) rightFoot.current.rotation.x = 0;
+    if (partying) {
+      const partyAt = partyElapsed(agent, Date.now());
+      const pose = partyPose(partyAt ?? 0, reducedMotion);
+      if (leftArm.current) leftArm.current.rotation.set(pose.leftX, 0, pose.leftZ);
+      if (rightArm.current) rightArm.current.rotation.set(pose.rightX, 0, pose.rightZ);
+      if (head.current) head.current.rotation.set(pose.headX, pose.headY, 0);
+      if (body.current) {
+        body.current.position.y += pose.bodyY;
+        body.current.rotation.set(pose.bodyX, 0, pose.bodyZ);
+      }
+      if (leftFoot.current) leftFoot.current.rotation.x = pose.leftFoot;
+      if (rightFoot.current) rightFoot.current.rotation.x = pose.rightFoot;
+      return;
+    }
     if (playing) {
       const time = reducedMotion ? 0 : clock.elapsedTime;
       if (playing === "arcade") {
@@ -163,9 +181,9 @@ export function AgentAvatar({
     <group
       ref={root}
       position={[
-        isWorking || walking || drinkingWater || playing ? 0 : 0.25,
-        agent.status === "needs_attention" ? 0.32 : 0,
-        walking || drinkingWater || playing ? 0 : 0.15,
+        isWorking || walking || drinkingWater || playing || partying ? 0 : 0.25,
+        agent.status === "needs_attention" && !partying ? 0.32 : 0,
+        walking || drinkingWater || playing || partying ? 0 : 0.15,
       ]}
       scale={agent.status === "spawning" ? 0.92 : 1}
     >

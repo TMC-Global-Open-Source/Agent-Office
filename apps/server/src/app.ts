@@ -13,12 +13,13 @@ import {
   type Agent,
   type AppConfig,
 } from "@agent-office/shared";
-import { nextDesk } from "@agent-office/shared";
+import { compactDesks, nextDesk } from "@agent-office/shared";
 import { env, projectRoot } from "./env.js";
 import { z, ZodError } from "zod";
 import { MockAgentProvider } from "./providers/mock.js";
 import { GitHubAgentProvider } from "./providers/github.js";
 import { LocalHooksProvider } from "./providers/local-hooks.js";
+import { ghPullRequestLookup } from "./providers/pull-request-watch.js";
 import type { AgentProvider } from "./providers/types.js";
 import { randomAvatarColor } from "./avatar-color.js";
 import { readUsageHistory } from "./usage-history.js";
@@ -33,6 +34,15 @@ function vscodeUsagePath(): string | null {
 export const prisma = new PrismaClient();
 export const mockProvider = new MockAgentProvider();
 export const localHooksProvider = new LocalHooksProvider();
+localHooksProvider.watchPullRequests(
+  ghPullRequestLookup,
+  env.AGENT_PROVIDER === "local" && env.NODE_ENV !== "test" ? env.PR_WATCH_INTERVAL_SECONDS : 0,
+);
+localHooksProvider.onPullRequestChange = () => {
+  void syncAgents().catch(() => {
+    console.error("Pull request merge refresh failed.");
+  });
+};
 export const provider: AgentProvider =
   env.AGENT_PROVIDER === "github"
     ? new GitHubAgentProvider()
@@ -169,6 +179,28 @@ async function getStoredAgents(includeArchived = false): Promise<Agent[]> {
     .filter((agent) => includeArchived || typeof agent.metadata.archivedAt !== "string");
 }
 
+/** Closes gaps left by removed desks so the remaining desks fill the top-left slots. */
+export async function compactStoredDesks(): Promise<void> {
+  const desks = await prisma.desk.findMany();
+  const moves = compactDesks(desks).filter((desk) => {
+    const before = desks.find((item) => item.id === desk.id)!;
+    return before.row !== desk.row || before.column !== desk.column;
+  });
+  if (!moves.length) return;
+  // Park moving desks on negative rows first so (row, column) stays unique mid-transaction.
+  await prisma.$transaction([
+    ...moves.map((desk, index) =>
+      prisma.desk.update({ where: { id: desk.id }, data: { row: -1 - index, column: 0 } }),
+    ),
+    ...moves.map((desk) =>
+      prisma.desk.update({
+        where: { id: desk.id },
+        data: { row: desk.row, column: desk.column },
+      }),
+    ),
+  ]);
+}
+
 async function performSyncAgents(): Promise<Agent[]> {
   const expiredDesks = await prisma.desk.findMany({
     where: { active: false, reservedUntil: { lte: new Date() }, agent: { status: "offline" } },
@@ -189,6 +221,7 @@ async function performSyncAgents(): Promise<Agent[]> {
     ]);
     io?.emit("agent:removed", { id: desk.agentId });
   }
+  if (expiredDesks.length) await compactStoredDesks();
   const incoming = (await provider.fetchAgents()).map((agent) => AgentSchema.parse(agent));
   const known = await prisma.agent.findMany({
     where: provider.name === "local" ? { source: "local" } : undefined,
@@ -257,6 +290,8 @@ async function performSyncAgents(): Promise<Agent[]> {
           ? { desk: { create: { id: desk.id, row: desk.row, column: desk.column } } }
           : {}),
         displayName: agent.displayName,
+        pullRequestNumber: agent.pullRequestNumber,
+        taskUrl: agent.taskUrl,
         status: agent.status,
         statusReason: agent.statusReason,
         statusConfidence: agent.statusConfidence,

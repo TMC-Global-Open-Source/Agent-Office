@@ -1,4 +1,4 @@
-import type { Agent } from "@agent-office/shared";
+import { compactDesks, type Agent } from "@agent-office/shared";
 import type { DeskData } from "./Workstation.js";
 
 export interface SubagentTeam {
@@ -11,10 +11,11 @@ export interface SubagentTeam {
   maxRow: number;
 }
 
-export function subagentLayout(agents: Agent[], desks: DeskData[]) {
+export function subagentLayout(agents: Agent[], allDesks: DeskData[]) {
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  const present = allDesks.filter((desk) => byId.has(desk.agentId));
   const groups = new Map<string, DeskData[]>();
-  for (const desk of desks) {
+  for (const desk of present) {
     const parent = byId.get(desk.agentId)?.metadata.parentAgentId;
     if (typeof parent !== "string" || parent === desk.agentId) continue;
     const members = groups.get(parent) ?? [];
@@ -22,6 +23,10 @@ export function subagentLayout(agents: Agent[], desks: DeskData[]) {
     groups.set(parent, members);
   }
   const childIds = new Set([...groups.values()].flat().map((desk) => desk.agentId));
+  const desks = [
+    ...compactDesks(present.filter((desk) => !childIds.has(desk.agentId))),
+    ...present.filter((desk) => childIds.has(desk.agentId)),
+  ];
   const baseColumn = 1;
   const overrides = new Map<string, DeskData>();
   const teams: SubagentTeam[] = [];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentSchema } from "./model.js";
-import { hexAvatarColor, nextDesk } from "./layout.js";
+import { compactDesks, hexAvatarColor, nextDesk } from "./layout.js";
 import { inferStatus } from "./status.js";
 
 describe("shared agent contracts", () => {
@@ -52,5 +52,18 @@ describe("shared agent contracts", () => {
     const first = nextDesk([], "one");
     const second = nextDesk([first], "two");
     expect(`${first.row}:${first.column}`).not.toBe(`${second.row}:${second.column}`);
+  });
+
+  it("compacts desks into consecutive top-left slots in their existing order", () => {
+    const compacted = compactDesks([
+      { id: "c", row: 2, column: 0 },
+      { id: "a", row: 0, column: 4 },
+      { id: "b", row: 1, column: 2 },
+    ]);
+    expect(compacted.map(({ id, row, column }) => [id, row, column])).toEqual([
+      ["a", 0, 0],
+      ["b", 0, 1],
+      ["c", 0, 2],
+    ]);
   });
 });

@@ -43,14 +43,27 @@ export function hexAvatarColor(id: string): string {
     .join("")}`;
 }
 
+export const DESKS_PER_ROW = 5;
+
+/** Reassigns desks to consecutive slots from the top-left, keeping their existing order. */
+export function compactDesks<T extends Pick<DeskPosition, "row" | "column">>(desks: T[]): T[] {
+  return [...desks]
+    .sort((a, b) => a.row - b.row || a.column - b.column)
+    .map((desk, index) => ({
+      ...desk,
+      row: Math.floor(index / DESKS_PER_ROW),
+      column: index % DESKS_PER_ROW,
+    }));
+}
+
 export function nextDesk(
   existing: Array<Pick<DeskPosition, "row" | "column">>,
   id: string,
 ): DeskPosition {
   const occupied = new Set(existing.map(({ row, column }) => `${row}:${column}`));
   let index = 0;
-  while (occupied.has(`${Math.floor(index / 5)}:${index % 5}`)) index += 1;
-  const row = Math.floor(index / 5);
-  const column = index % 5;
+  while (occupied.has(`${Math.floor(index / DESKS_PER_ROW)}:${index % DESKS_PER_ROW}`)) index += 1;
+  const row = Math.floor(index / DESKS_PER_ROW);
+  const column = index % DESKS_PER_ROW;
   return { id, row, column, x: (column - 2) * 3.2, z: row * 3.2 };
 }
