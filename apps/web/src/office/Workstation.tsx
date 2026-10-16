@@ -152,21 +152,21 @@ export const Workstation = memo(function Workstation({
           emissiveIntensity={agent.status === "needs_attention" ? 0.55 : 0.22}
         />
       </mesh>
-      <group position={[0, 0.15, 0.95]} rotation={[0, Math.PI, 0]}>
-        <mesh position={[0, 0.9, -0.2]} rotation={[-0.08, 0, 0]} castShadow>
+      <group position={[0, 0.15, 0.62]} rotation={[0, Math.PI, 0]}>
+        <mesh position={[0, 0.86, -0.19]} rotation={[-0.08, 0, 0]} castShadow>
           <boxGeometry args={[0.5, 0.5, 0.07]} />
           <meshStandardMaterial color="#536a68" />
         </mesh>
-        <mesh position={[0, 0.6, -0.2]}>
+        <mesh position={[0, 0.57, -0.19]}>
           <boxGeometry args={[0.08, 0.2, 0.05]} />
           <meshStandardMaterial color="#33403f" />
         </mesh>
-        <mesh position={[0, 0.54, 0.02]} castShadow>
-          <boxGeometry args={[0.54, 0.09, 0.48]} />
+        <mesh position={[0, 0.5, 0.02]} castShadow>
+          <boxGeometry args={[0.54, 0.09, 0.46]} />
           <meshStandardMaterial color="#536a68" />
         </mesh>
-        <mesh position={[0, 0.21, 0.02]}>
-          <cylinderGeometry args={[0.035, 0.035, 0.58, 8]} />
+        <mesh position={[0, 0.19, 0.02]}>
+          <cylinderGeometry args={[0.035, 0.035, 0.54, 8]} />
           <meshStandardMaterial color="#9aa6a5" metalness={0.4} roughness={0.4} />
         </mesh>
         <mesh position={[0, -0.08, 0.02]}>
