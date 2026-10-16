@@ -1,24 +1,53 @@
 import type { Agent } from "@agent-office/shared";
 
-/** Seconds an agent celebrates after one of its pull requests is merged. */
+/** Seconds an agent celebrates after a pull request merge or a secret office party. */
 export const partyDuration = 14;
 /** Seconds into the party when each confetti burst is thrown. */
 export const confettiBursts = [0.2, 2.6, 10.4];
 
-export function partyStartedAt(agent: Agent): number | null {
-  const pullRequest = agent.metadata?.pullRequest as { celebrationAt?: unknown } | undefined;
-  const started =
-    typeof pullRequest?.celebrationAt === "string" ? Date.parse(pullRequest.celebrationAt) : NaN;
-  return Number.isFinite(started) ? started : null;
+function parseTime(value: unknown): number | null {
+  const time = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(time) ? time : null;
 }
 
-/** Seconds into the merge party, or null when the agent is not celebrating. */
-export function partyElapsed(agent: Agent, now: number): number | null {
-  if (agent.status === "offline") return null;
-  const started = partyStartedAt(agent);
+function mergePartyAt(agent: Agent): number | null {
+  const pullRequest = agent.metadata?.pullRequest as { celebrationAt?: unknown } | undefined;
+  return parseTime(pullRequest?.celebrationAt);
+}
+
+/** Client-only start time of the secret office party (see `useSecretParty`). */
+export function officePartyAt(agent: Agent): number | null {
+  return parseTime(agent.metadata?.officeParty);
+}
+
+/** Start of the most recent party (merge celebration or office party) in epoch ms. */
+export function partyStartedAt(agent: Agent): number | null {
+  const starts = [mergePartyAt(agent), officePartyAt(agent)].filter(
+    (time): time is number => time !== null,
+  );
+  return starts.length ? Math.max(...starts) : null;
+}
+
+function activeElapsed(started: number | null, now: number): number | null {
   if (started === null) return null;
   const elapsed = (now - started) / 1000;
   return elapsed >= 0 && elapsed < partyDuration ? elapsed : null;
+}
+
+/** Seconds into the current party, or null when the agent is not celebrating. */
+export function partyElapsed(agent: Agent, now: number): number | null {
+  if (agent.status === "offline") return null;
+  return activeElapsed(partyStartedAt(agent), now);
+}
+
+/** True while the agent celebrates a merged pull request (which happens at its desk). */
+export function mergePartyActive(agent: Agent, now: number): boolean {
+  return agent.status !== "offline" && activeElapsed(mergePartyAt(agent), now) !== null;
+}
+
+/** True while the agent is dancing at a secret office party. */
+export function officePartyActive(agent: Agent, now: number): boolean {
+  return agent.status !== "offline" && activeElapsed(officePartyAt(agent), now) !== null;
 }
 
 export interface PartyPose {

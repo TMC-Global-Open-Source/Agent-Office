@@ -28,6 +28,8 @@ import { officeViews, type OfficeView } from "./camera-views.js";
 import { useOfficeStore } from "../store.js";
 import { agentDisplayName } from "../agent-name.js";
 import { belongsInLounge } from "./lounge-eligibility.js";
+import { partyElapsed, partyStartedAt } from "./party-animation.js";
+import { useSecretParty } from "./secret-party.js";
 
 const defaultZoom = 50;
 
@@ -159,13 +161,25 @@ function Scene({
       ),
     [loungeIndexByAgent, allAgents],
   );
+  const partyHosts = useMemo(
+    () => allAgents.filter((agent) => partyStartedAt(agent) !== null),
+    [allAgents],
+  );
   useFrame((_, delta) => {
     waterClock.current += Math.min(delta, 0.1);
+    const now = Date.now();
+    const partiers = new Set(
+      partyHosts.filter((agent) => partyElapsed(agent, now) !== null).map((agent) => agent.id),
+    );
+    const withoutPartiers = (seats: Map<string, number>) =>
+      partiers.size ? new Map([...seats].filter(([id]) => !partiers.has(id))) : seats;
     const gamers = gameVisitors(gameState.current);
     const next = advanceWaterBreak(
       waterState.current,
       waterClock.current,
-      gamers.size ? new Map([...fullIdleSeats].filter(([id]) => !gamers.has(id))) : fullIdleSeats,
+      withoutPartiers(
+        gamers.size ? new Map([...fullIdleSeats].filter(([id]) => !gamers.has(id))) : fullIdleSeats,
+      ),
       reducedMotion,
       (id) => loungePersonality(id).variant,
     );
@@ -177,7 +191,7 @@ function Scene({
     const nextGame = advanceGameRoom(
       gameState.current,
       waterClock.current,
-      loungeIndexByAgent,
+      withoutPartiers(loungeIndexByAgent),
       reducedMotion,
       new Set(water ? [water] : []),
     );
@@ -343,10 +357,25 @@ export function OfficeScene(props: {
   zoomRef: MutableRefObject<((direction: number) => void) | null>;
 }) {
   const showSource = useOfficeStore((state) => state.showAgentSource);
+  const allAgentsRef = useRef(props.allAgents);
+  allAgentsRef.current = props.allAgents;
+  const [officeParty, setOfficeParty] = useState<{ at: string; guests: Set<string> } | null>(null);
+  useSecretParty(() => {
+    const now = Date.now();
+    const guests = allAgentsRef.current.filter((agent) => belongsInLounge(agent, now));
+    if (guests.length)
+      setOfficeParty({
+        at: new Date(now).toISOString(),
+        guests: new Set(guests.map((agent) => agent.id)),
+      });
+  });
   const displayAgents = (agents: Agent[]) =>
     agents.map((agent) => ({
       ...agent,
       displayName: agentDisplayName(agent, showSource),
+      metadata: officeParty?.guests.has(agent.id)
+        ? { ...agent.metadata, officeParty: officeParty.at }
+        : agent.metadata,
     }));
   return (
     <Canvas
