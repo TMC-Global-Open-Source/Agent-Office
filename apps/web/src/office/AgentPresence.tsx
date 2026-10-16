@@ -9,7 +9,13 @@ import { AgentAvatar } from "./AgentAvatar.js";
 import { livingRoomSeat } from "./LivingRoom.js";
 import { coolerDrinkingRotation, waterVisitPosition, type WaterVisit } from "./water-cooler.js";
 import { gameVisitPosition, playerRotation, type GameVisit } from "./game-room.js";
-import { partyDuration, partyElapsed, partyStartedAt } from "./party-animation.js";
+import {
+  mergePartyActive,
+  officePartyActive,
+  partyDuration,
+  partyElapsed,
+  partyStartedAt,
+} from "./party-animation.js";
 import { Confetti } from "./Confetti.js";
 
 const gameLabels = {
@@ -55,20 +61,22 @@ export function AgentPresence({
     const timer = window.setTimeout(() => setPartyClock(Date.now()), next - now + 20);
     return () => window.clearTimeout(timer);
   }, [partyStart, partyClock]);
-  const partying = partyElapsed(agent, Math.max(partyClock, Date.now())) !== null;
+  const now = Math.max(partyClock, Date.now());
+  const partying = partyElapsed(agent, now) !== null;
+  const officeParty = officePartyActive(agent, now) && !mergePartyActive(agent, now);
   const atLounge =
-    !partying &&
+    (!partying || officeParty) &&
     (agent.status === "idle" || agent.status === "completed") &&
     loungeIndex !== undefined;
-  const visit = atLounge && !reducedMotion ? waterVisit : null;
-  const game = atLounge && !reducedMotion && !visit ? gameVisit : null;
-  const isRelaxing = atLounge && !visit && !game;
+  const visit = atLounge && !partying && !reducedMotion ? waterVisit : null;
+  const game = atLounge && !partying && !reducedMotion && !visit ? gameVisit : null;
+  const isRelaxing = atLounge && !partying && !visit && !game;
   const playing = game?.phase === "playing" ? game.machine : null;
   const seat = atLounge ? livingRoomSeat(loungeIndex) : null;
   const targetX = seat?.[0] ?? (desk.column - 2) * 3.15;
-  const targetY = seat?.[1] ?? (partying ? 0 : 0.17);
-  // Celebrations happen standing behind the chair, facing the room.
-  const targetZ = seat?.[2] ?? desk.row * 3.15 + (partying ? 1.6 : 0.65);
+  const targetY = partying ? 0 : (seat?.[1] ?? 0.17);
+  // Celebrations happen standing: in front of the couch seat, or behind the desk chair.
+  const targetZ = seat ? seat[2] + (partying ? 1.1 : 0) : desk.row * 3.15 + (partying ? 1.6 : 0.65);
   const targetRotation = seat || partying ? 0 : Math.PI;
   const pullRequestNumber = (agent.metadata?.pullRequest as { number?: unknown } | undefined)
     ?.number;
@@ -148,9 +156,11 @@ export function AgentPresence({
             maxWidth={2.8}
             textAlign="center"
           >
-            {typeof pullRequestNumber === "number"
-              ? `PR #${pullRequestNumber} merged!`
-              : "PR merged!"}
+            {officeParty
+              ? "Party time!"
+              : typeof pullRequestNumber === "number"
+                ? `PR #${pullRequestNumber} merged!`
+                : "PR merged!"}
           </Text>
         </OfficeLabel>
       )}

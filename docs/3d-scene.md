@@ -44,6 +44,12 @@ machine animation (invaders and ship on the arcade screen; ball, bumpers, and fl
 the table), then return to their couch seat. An agent on a water break is never chosen,
 new work cancels the game, and reduced-motion mode suppresses game breaks.
 
+Secret office party: typing `party` (or the Konami code ↑↑↓↓←→←→BA) anywhere outside a form
+field makes every lounge agent (idle, or completed after its cheer) stand in front of its
+couch seat and run the 14-second merge-party routine with confetti and a "Party time!" label.
+Water and game breaks are cancelled for the party. It is client-only (`secret-party.ts`): it
+changes no server state and only plays in the browser where it was typed.
+
 Offline agents are out of the office: their avatars disappear, their desk monitors
 dim, and an Away marker remains. Roster/list entries show last-seen time. Desks stay
 reserved for the configured **Offline desk retention (hours)**, without extending
