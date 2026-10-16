@@ -51,4 +51,20 @@ describe("subagent floor grouping", () => {
     expect(subagentLayout([...agents].reverse(), [...desks].reverse()).teams).toEqual(layout.teams);
     expect(desks[2]?.column).toBe(2);
   });
+
+  it("consolidates visible desks into the top-left slots when others leave", () => {
+    const agents = ["a", "b", "c"].map((id) => agent(id));
+    const desks = [
+      { id: "desk-a", agentId: "a", row: 0, column: 3, active: true },
+      { id: "desk-gone", agentId: "gone", row: 0, column: 0, active: false },
+      { id: "desk-c", agentId: "c", row: 1, column: 4, active: true },
+      { id: "desk-b", agentId: "b", row: 1, column: 1, active: true },
+    ];
+    const layout = subagentLayout(agents, desks);
+    expect(layout.desks.map((desk) => [desk.agentId, desk.row, desk.column])).toEqual([
+      ["a", 0, 0],
+      ["b", 0, 1],
+      ["c", 0, 2],
+    ]);
+  });
 });

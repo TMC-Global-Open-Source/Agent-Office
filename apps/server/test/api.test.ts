@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
-import { app, prisma, syncAgents } from "../src/app.js";
+import type { AddressInfo } from "node:net";
+import { networkInterfaces } from "node:os";
+import { app, isLoopbackAddress, prisma, syncAgents } from "../src/app.js";
 
 describe("Agent Office API", () => {
   beforeEach(async () => {
@@ -19,6 +21,44 @@ describe("Agent Office API", () => {
   it("reports health without exposing credentials", async () => {
     const response = await request(app).get("/api/v1/health").expect(200);
     expect(JSON.stringify(response.body)).not.toContain("GITHUB_TOKEN");
+    expect(response.body.data.shared).toBe(false);
+  });
+
+  it("recognizes loopback addresses for host-only changes", () => {
+    for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"])
+      expect(isLoopbackAddress(address)).toBe(true);
+    for (const address of ["192.168.1.20", "::ffff:10.0.0.5", "0.0.0.0", "", undefined])
+      expect(isLoopbackAddress(address)).toBe(false);
+  });
+
+  it("lets other computers view status but not change settings", async () => {
+    const lanAddress = Object.values(networkInterfaces())
+      .flat()
+      .find((item) => item && item.family === "IPv4" && !item.internal)?.address;
+    if (!lanAddress) return;
+    const server = app.listen(0, "0.0.0.0");
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const base = `http://${lanAddress}:${port}/api/v1`;
+      expect((await fetch(`${base}/agents`)).status).toBe(200);
+      const config = await fetch(`${base}/config`).then((response) => response.json());
+      const update = await fetch(`${base}/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config.data),
+      });
+      expect(update.status).toBe(403);
+      expect((await update.json()).error.code).toBe("VIEW_ONLY");
+      const color = await fetch(`${base}/agents/any/color`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ color: "#123456" }),
+      });
+      expect(color.status).toBe(403);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it("returns an empty agent list before the first refresh", async () => {
@@ -105,6 +145,26 @@ describe("Agent Office API", () => {
     expect(returned.body.data.avatarColor).toBe("#123456");
     expect(returned.body.data.metadata.archivedAt).toBeUndefined();
     expect((await prisma.desk.findUnique({ where: { agentId: "demo-theo" } }))?.active).toBe(true);
+  });
+
+  it("consolidates remaining desks into the top-left slots after a desk is removed", async () => {
+    await syncAgents();
+    const before = await prisma.desk.findMany({ orderBy: [{ row: "asc" }, { column: "asc" }] });
+    const theo = before.find((desk) => desk.agentId === "demo-theo")!;
+    expect(before.at(-1)?.id).not.toBe(theo.id);
+    await request(app).post("/api/v1/demo/events/agent-offline").expect(200);
+    await prisma.desk.update({
+      where: { agentId: "demo-theo" },
+      data: { reservedUntil: new Date(Date.now() - 1000) },
+    });
+    await syncAgents();
+    const after = await prisma.desk.findMany({ orderBy: [{ row: "asc" }, { column: "asc" }] });
+    expect(after.map((desk) => desk.agentId)).toEqual(
+      before.filter((desk) => desk.id !== theo.id).map((desk) => desk.agentId),
+    );
+    after.forEach((desk, index) => {
+      expect([desk.row, desk.column]).toEqual([Math.floor(index / 5), index % 5]);
+    });
   });
 
   it("saves joining colors and preserves them instead of using provider colors on refresh", async () => {

@@ -13,6 +13,15 @@ import { MathUtils, OrthographicCamera } from "three";
 import { subagentLayout } from "./subagent-layout.js";
 import { SubagentTeams } from "./SubagentTeams.js";
 import { WaterCooler } from "./WaterCooler.js";
+import { GameCorner } from "./GameCorner.js";
+import {
+  advanceGameRoom,
+  gameMachines,
+  gameStandingPositions,
+  gameVisitors,
+  initialGameRoom,
+  type GameRoomState,
+} from "./game-room.js";
 import { advanceWaterBreak, coolerStandingPosition, type WaterBreakState } from "./water-cooler.js";
 import { loungePersonality } from "./lounge-animation.js";
 import { officeViews, type OfficeView } from "./camera-views.js";
@@ -72,6 +81,8 @@ function Scene({
   const waterClock = useRef(0);
   const waterState = useRef<WaterBreakState>({ visit: null, nextAt: null, variants: {} });
   const [waterBreak, setWaterBreak] = useState(waterState.current);
+  const gameState = useRef<GameRoomState>(initialGameRoom());
+  const [gameRoom, setGameRoom] = useState(gameState.current);
   const saveCamera = () => {
     const camera = controls.current?.object;
     if (!controls.current || !(camera instanceof OrthographicCamera)) return;
@@ -150,10 +161,11 @@ function Scene({
   );
   useFrame((_, delta) => {
     waterClock.current += Math.min(delta, 0.1);
+    const gamers = gameVisitors(gameState.current);
     const next = advanceWaterBreak(
       waterState.current,
       waterClock.current,
-      fullIdleSeats,
+      gamers.size ? new Map([...fullIdleSeats].filter(([id]) => !gamers.has(id))) : fullIdleSeats,
       reducedMotion,
       (id) => loungePersonality(id).variant,
     );
@@ -161,16 +173,33 @@ function Scene({
       waterState.current = next;
       setWaterBreak(next);
     }
+    const water = waterState.current.visit?.agentId;
+    const nextGame = advanceGameRoom(
+      gameState.current,
+      waterClock.current,
+      loungeIndexByAgent,
+      reducedMotion,
+      new Set(water ? [water] : []),
+    );
+    if (nextGame !== gameState.current) {
+      gameState.current = nextGame;
+      setGameRoom(nextGame);
+    }
   });
   useFrame(({ camera }, delta) => {
     if ((!selectedDesk && selectedLoungeIndex === undefined) || reducedMotion || !controls.current)
       return;
+    const selectedGame = gameMachines.find(
+      (machine) => gameRoom.visits[machine]?.agentId === selectedId,
+    );
     const [x, , z] =
       waterBreak.visit?.agentId === selectedId
         ? coolerStandingPosition
-        : selectedLoungeIndex !== undefined
-          ? livingRoomSeat(selectedLoungeIndex)
-          : [(selectedDesk!.column - 2) * 3.15, 0, selectedDesk!.row * 3.15];
+        : selectedGame
+          ? gameStandingPositions[selectedGame]
+          : selectedLoungeIndex !== undefined
+            ? livingRoomSeat(selectedLoungeIndex)
+            : [(selectedDesk!.column - 2) * 3.15, 0, selectedDesk!.row * 3.15];
     const amount = Math.min(1, delta * 1.6);
     const dx = (x - controls.current.target.x) * amount;
     const dz = (z - controls.current.target.z) * amount;
@@ -230,6 +259,11 @@ function Scene({
       )}
       <LivingRoom seatCount={allAgents.length} />
       <WaterCooler />
+      <GameCorner
+        arcadePlaying={gameRoom.visits.arcade?.phase === "playing"}
+        pinballPlaying={gameRoom.visits.pinball?.phase === "playing"}
+        reducedMotion={reducedMotion}
+      />
       <SubagentTeams
         teams={layout.teams.filter((team) =>
           team.agentIds.some((id) => agents.some((agent) => agent.id === id)),
@@ -263,6 +297,11 @@ function Scene({
             desk={desk}
             loungeIndex={loungeIndexByAgent.get(agent.id)}
             waterVisit={waterBreak.visit?.agentId === agent.id ? waterBreak.visit : null}
+            gameVisit={
+              gameMachines
+                .map((machine) => gameRoom.visits[machine])
+                .find((visit) => visit?.agentId === agent.id) ?? null
+            }
             waterClock={waterClock}
             loungeVariant={waterBreak.variants[agent.id]}
             labels={labels}

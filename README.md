@@ -21,6 +21,20 @@ For console debugging, run `.\Launch-Agent-Office.cmd -Foreground` and keep that
 By default the built dashboard and API share **http://127.0.0.1:4000**.
 An already-running office is reused rather than starting a duplicate.
 
+### View the office from other computers
+
+Double-click `Share-Agent-Office.cmd` (or run `.\Launch-Agent-Office.cmd -Share`) to listen
+on your network. The launcher prints the addresses other computers can open, such as
+`http://<this-computer-name>:4000`. To always share, set `HOST=0.0.0.0` in `.env`.
+If the office is already running without sharing, stop it first with `Stop-Agent-Office.cmd`.
+
+- Other computers are **view-only**: settings, agent colors, demo events, and lifecycle hooks
+  can only be changed from the host computer (they receive `403 VIEW_ONLY`). Refresh is allowed.
+- Viewers can see agent names, folder names, and token/AI-credit usage. There is no login
+  and traffic is plain HTTP, so share only on a trusted private network or VPN.
+- Windows Firewall must allow inbound TCP on the port. Run the launcher once as administrator
+  to add a Private/Domain rule automatically, or accept the Node.js firewall prompt.
+
 After updating the source, stop the running office and double-click
 `Build-Agent-Office.cmd` to rebuild it, then use `Launch-Agent-Office.cmd` again.
 Build only compiles the app; it does not change your settings, reset the database,
@@ -99,7 +113,7 @@ The title is stored in SQLite, applies immediately, and survives reloads and ser
 It accepts 1–120 characters (excluding surrounding whitespace); the default is
 “Good work happens together.”
 
-See `.env.example`. Startup validates configuration. `GITHUB_TOKEN` is optional in mock mode. The server binds to `127.0.0.1` by default.
+See `.env.example`. Startup validates configuration. `GITHUB_TOKEN` is optional in mock mode. The server binds to `127.0.0.1` by default; `HOST=0.0.0.0` (or the `-Share` launcher switch) shares a view-only office on the network.
 
 ## Commands
 
@@ -134,7 +148,12 @@ attention wave one raised arm (a static raised arm with reduced motion).
 Completion plays a 12-second cheer, celebratory sway, and farewell wave before settling.
 After the celebration, completed agents relax on the couch while retaining their
 Completed status and history. Sessions already completed when the dashboard opens
-go directly to the lounge if their celebration period has elapsed.
+go directly to the lounge if their celebration period has elapsed. Lounge agents
+occasionally take a break at the arcade cabinet or pinball table (labelled "Playing
+arcade" / "Playing pinball"); reduced motion disables these breaks.
+When a local agent's pull request is merged, it parties at its desk for 14 seconds (jump,
+wave, floss, confetti); this needs the GitHub CLI signed in (`gh auth login`). See
+[docs/local-copilot-hooks.md](docs/local-copilot-hooks.md#pull-request-merge-party).
 Attention uses a repeating 8-second wave-and-scan sequence until its status changes.
 Neither animation extends the configured waiting/idle timeout or blocks new work.
 Typing uses alternating raised keystrokes, lateral hand travel, wrist motion, and a subtle

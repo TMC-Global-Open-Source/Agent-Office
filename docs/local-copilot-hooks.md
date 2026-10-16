@@ -15,8 +15,10 @@ Restart Agent Office after installation. Start or resume local Copilot CLI or VS
 ## Data and status
 
 The hook command sends an event name, runtime label, opaque session/subagent identity,
-timestamp, workspace folder name, supplied subagent type, session-end reason, and
-tool name to `127.0.0.1`. Identities are SHA-256 hashed before persistence. Prompt text,
+timestamp, workspace folder name, session folder path, supplied subagent type, session-end
+reason, and tool name to `127.0.0.1`. Identities are SHA-256 hashed before persistence. The
+session folder path is kept only in server memory to watch pull requests (below); it is never
+persisted or returned by the API. Prompt text,
 transcript paths, tool arguments/results, error messages, and stack traces are discarded
 before the request is sent. Tool names are classified into activities, not persisted as raw payloads.
 
@@ -55,6 +57,23 @@ wait and return the session to `working` immediately. Pending waits survive serv
 Inactivity beyond the configured offline threshold reports `offline`. Copilot CLI session-end events report `completed`, `failed`, or `offline` based on the end reason. VS Code Local hooks expose turn stop rather than an end-of-session event, so a stopped VS Code session remains idle after its prompt-wait delay until it resumes or reaches the offline threshold.
 
 The server binds to loopback by default and requires the generated bearer token for hook requests. Do not expose the server to a network without adding appropriate authentication and transport security. Remote/cloud VS Code sessions are not delivered to this local hook bridge.
+
+## Pull request merge party
+
+For each online local session, the server runs `gh pr view --json number,state,mergedAt,url,title`
+in the session folder (the PR for the checked-out branch). Checks run shortly after a session
+starts, a few seconds after tool completions/turn stops/session end (at most once per 15 seconds
+per session), and otherwise every `PR_WATCH_INTERVAL_SECONDS` (60 by default; `0` disables it).
+This requires the [GitHub CLI](https://cli.github.com/) on `PATH` and `gh auth login`; if `gh`
+is missing, watching is disabled with a log warning. Branches without a PR are ignored.
+
+The agent's profile links the detected PR. When a watched PR changes from open to merged, or
+a merge newer than ten minutes is first seen, the agent celebrates for 14 seconds at its desk:
+jumps for joy, waves, does the floss and throws confetti, with a "PR #n merged!" label. Each
+merge celebrates once (the timestamp is stored in `metadata.pullRequest.celebrationAt`) and
+reduced motion shows a static arms-up pose without confetti. You do not need to rerun
+`npm run connect:agents`: the installed hook already runs this repository's helper, which now
+sends the folder.
 
 ## Token usage
 

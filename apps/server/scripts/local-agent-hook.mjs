@@ -37,6 +37,7 @@ try {
     sessionId,
     timestamp,
     workspace,
+    cwd: cwd.slice(0, 1024),
     ...(event === "sessionEnd" && typeof payload.reason === "string"
       ? { reason: payload.reason }
       : {}),
