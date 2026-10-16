@@ -9,6 +9,7 @@ import * as THREE from "three";
 import type { Agent } from "@agent-office/shared";
 import { getOfficeActivity, officeActivityLabels } from "@agent-office/shared";
 import { statusColors, statusLabels } from "../store.js";
+import { bossActive } from "./boss-mode.js";
 
 export interface DeskData {
   id: string;
@@ -106,7 +107,11 @@ export const Workstation = memo(function Workstation({
         <boxGeometry args={[0.34, 0.025, 0.18]} />
         <meshStandardMaterial color="#384b50" />
       </mesh>
-      <MonitorScreen activity={getOfficeActivity(agent)} reducedMotion={reducedMotion} />
+      <MonitorScreen
+        activity={getOfficeActivity(agent)}
+        reducedMotion={reducedMotion}
+        bossing={bossActive(agent, Date.now())}
+      />
       {[-0.105, -0.035, 0.035, 0.105].map((keyX) =>
         [-0.04, 0.02, 0.08].map((keyZ) => (
           <mesh key={`${keyX}:${keyZ}`} position={[keyX, 0.886, 0.13 + keyZ]}>

@@ -9,6 +9,7 @@ import { activityPose } from "./activity-animation.js";
 import { statusPose } from "./status-animation.js";
 import { arcadeInput, pinballFlips, type GameMachine } from "./game-room.js";
 import { partyElapsed, partyPose } from "./party-animation.js";
+import { bossPose } from "./boss-mode.js";
 
 export function AgentAvatar({
   agent,
@@ -20,6 +21,7 @@ export function AgentAvatar({
   drinkingWater = false,
   playing = null,
   partying = false,
+  bossing = false,
 }: {
   agent: Agent;
   selected: boolean;
@@ -30,6 +32,7 @@ export function AgentAvatar({
   drinkingWater?: boolean;
   playing?: GameMachine | null;
   partying?: boolean;
+  bossing?: boolean;
 }) {
   const root = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
@@ -40,8 +43,8 @@ export function AgentAvatar({
   const rightFoot = useRef<THREE.Group>(null);
   const offline = agent.status === "offline";
   const isRelaxing =
-    !partying && relaxing && (agent.status === "idle" || agent.status === "completed");
-  const isWorking = !partying && agent.status === "working";
+    !walking && !partying && relaxing && (agent.status === "idle" || agent.status === "completed");
+  const isWorking = !walking && !partying && (agent.status === "working" || bossing);
   const activity = getOfficeActivity(agent);
   const idleVariant = loungeVariant ?? loungePersonality(agent.id).variant;
 
@@ -98,12 +101,22 @@ export function AgentAvatar({
       return;
     }
     if (walking || drinkingWater) {
-      const stride = reducedMotion ? 0 : Math.sin(clock.elapsedTime * 7) * 0.3;
+      const stride = reducedMotion
+        ? 0
+        : Math.sin(clock.elapsedTime * (bossing ? 16 : 7)) * (bossing ? 0.8 : 0.3);
       if (leftFoot.current) leftFoot.current.rotation.x = walking ? stride : 0;
       if (rightFoot.current) rightFoot.current.rotation.x = walking ? -stride : 0;
       if (leftArm.current) leftArm.current.rotation.x = walking ? -stride : 0.12;
       if (rightArm.current) rightArm.current.rotation.x = drinkingWater ? -1.8 : stride;
       if (head.current && drinkingWater) head.current.rotation.x = -0.08;
+      return;
+    }
+    if (bossing) {
+      const pose = bossPose(clock.elapsedTime, reducedMotion);
+      leftArm.current?.rotation.set(pose.leftX, 0, pose.leftZ);
+      rightArm.current?.rotation.set(pose.rightX, 0, pose.rightZ);
+      head.current?.rotation.set(pose.headX, 0, 0);
+      body.current?.rotation.set(pose.bodyX, 0, pose.bodyZ);
       return;
     }
     if (isRelaxing) {
@@ -182,7 +195,7 @@ export function AgentAvatar({
       ref={root}
       position={[
         isWorking || walking || drinkingWater || playing || partying ? 0 : 0.25,
-        agent.status === "needs_attention" && !partying ? 0.32 : 0,
+        agent.status === "needs_attention" && !partying && !walking ? 0.32 : 0,
         walking || drinkingWater || playing || partying ? 0 : 0.15,
       ]}
       scale={agent.status === "spawning" ? 0.92 : 1}
@@ -211,10 +224,10 @@ export function AgentAvatar({
               <meshStandardMaterial color={accent} />
             </mesh>
           </group>
-          {isWorking && (
+          {isWorking && !bossing && (
             <TypingArms id={agent.id} reducedMotion={reducedMotion} activity={activity} />
           )}
-          {isWorking && ["reading", "researching", "organizing"].includes(activity) && (
+          {isWorking && !bossing && ["reading", "researching", "organizing"].includes(activity) && (
             <group
               position={[0, activity === "reading" ? 1.02 : 0.81, 0.35]}
               rotation={[-0.25, 0, 0]}
@@ -236,7 +249,7 @@ export function AgentAvatar({
               ))}
             </group>
           )}
-          <group ref={leftArm} position={[-0.24, 1.12, 0]} visible={!isWorking}>
+          <group ref={leftArm} position={[-0.24, 1.12, 0]} visible={!isWorking || bossing}>
             <mesh position={[-0.02, -0.18, 0]} castShadow>
               <boxGeometry args={[0.13, 0.38, 0.15]} />
               {limbMaterial}
@@ -246,7 +259,7 @@ export function AgentAvatar({
               <meshStandardMaterial color="#e5bd97" />
             </mesh>
           </group>
-          <group ref={rightArm} position={[0.24, 1.12, 0]} visible={!isWorking}>
+          <group ref={rightArm} position={[0.24, 1.12, 0]} visible={!isWorking || bossing}>
             <mesh position={[0.02, -0.18, 0]} castShadow>
               <boxGeometry args={[0.13, 0.38, 0.15]} />
               {limbMaterial}

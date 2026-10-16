@@ -30,6 +30,7 @@ import { agentDisplayName } from "../agent-name.js";
 import { belongsInLounge } from "./lounge-eligibility.js";
 import { partyElapsed, partyStartedAt } from "./party-animation.js";
 import { useSecretParty } from "./secret-party.js";
+import { bossActive, bossDurationMs, bossEligible } from "./boss-mode.js";
 
 const defaultZoom = 50;
 
@@ -162,14 +163,16 @@ function Scene({
     [loungeIndexByAgent, allAgents],
   );
   const partyHosts = useMemo(
-    () => allAgents.filter((agent) => partyStartedAt(agent) !== null),
+    () => allAgents.filter((agent) => partyStartedAt(agent) !== null || agent.metadata?.bossAt),
     [allAgents],
   );
   useFrame((_, delta) => {
     waterClock.current += Math.min(delta, 0.1);
     const now = Date.now();
     const partiers = new Set(
-      partyHosts.filter((agent) => partyElapsed(agent, now) !== null).map((agent) => agent.id),
+      partyHosts
+        .filter((agent) => partyElapsed(agent, now) !== null || bossActive(agent, now))
+        .map((agent) => agent.id),
     );
     const withoutPartiers = (seats: Map<string, number>) =>
       partiers.size ? new Map([...seats].filter(([id]) => !partiers.has(id))) : seats;
@@ -360,22 +363,44 @@ export function OfficeScene(props: {
   const allAgentsRef = useRef(props.allAgents);
   allAgentsRef.current = props.allAgents;
   const [officeParty, setOfficeParty] = useState<{ at: string; guests: Set<string> } | null>(null);
-  useSecretParty(() => {
-    const now = Date.now();
-    const guests = allAgentsRef.current.filter((agent) => belongsInLounge(agent, now));
-    if (guests.length)
-      setOfficeParty({
-        at: new Date(now).toISOString(),
-        guests: new Set(guests.map((agent) => agent.id)),
-      });
-  });
+  const [boss, setBoss] = useState<{ at: string; guests: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!boss) return;
+    const timer = window.setTimeout(
+      () => setBoss(null),
+      Math.max(0, Date.parse(boss.at) + bossDurationMs - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [boss]);
+  useSecretParty(
+    () => {
+      const now = Date.now();
+      const guests = allAgentsRef.current.filter((agent) => belongsInLounge(agent, now));
+      if (guests.length) {
+        setBoss(null);
+        setOfficeParty({
+          at: new Date(now).toISOString(),
+          guests: new Set(guests.map((agent) => agent.id)),
+        });
+      }
+    },
+    () => {
+      const now = Date.now();
+      const guests = allAgentsRef.current.filter((agent) => bossEligible(agent, now));
+      if (!guests.length) return;
+      setOfficeParty(null);
+      setBoss({ at: new Date().toISOString(), guests: new Set(guests.map((agent) => agent.id)) });
+    },
+  );
   const displayAgents = (agents: Agent[]) =>
     agents.map((agent) => ({
       ...agent,
       displayName: agentDisplayName(agent, showSource),
-      metadata: officeParty?.guests.has(agent.id)
-        ? { ...agent.metadata, officeParty: officeParty.at }
-        : agent.metadata,
+      metadata: {
+        ...agent.metadata,
+        ...(officeParty?.guests.has(agent.id) ? { officeParty: officeParty.at } : {}),
+        ...(boss?.guests.has(agent.id) ? { bossAt: boss.at } : {}),
+      },
     }));
   return (
     <Canvas

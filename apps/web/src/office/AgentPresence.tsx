@@ -17,6 +17,8 @@ import {
   partyStartedAt,
 } from "./party-animation.js";
 import { Confetti } from "./Confetti.js";
+import { bossActive } from "./boss-mode.js";
+import { deskTravelStep } from "./desk-travel.js";
 
 const gameLabels = {
   arcade: { outbound: "Heading to the arcade", playing: "Playing arcade" },
@@ -50,6 +52,8 @@ export function AgentPresence({
 }) {
   const root = useRef<THREE.Group>(null);
   const initialized = useRef(false);
+  const [running, setRunning] = useState(false);
+  const [travelling, setTravelling] = useState(false);
   const [partyClock, setPartyClock] = useState(Date.now);
   const partyStart = partyStartedAt(agent);
   useEffect(() => {
@@ -62,9 +66,11 @@ export function AgentPresence({
     return () => window.clearTimeout(timer);
   }, [partyStart, partyClock]);
   const now = Math.max(partyClock, Date.now());
-  const partying = partyElapsed(agent, now) !== null;
+  const bossing = bossActive(agent, now);
+  const partying = !bossing && partyElapsed(agent, now) !== null;
   const officeParty = officePartyActive(agent, now) && !mergePartyActive(agent, now);
   const atLounge =
+    !bossing &&
     (!partying || officeParty) &&
     (agent.status === "idle" || agent.status === "completed") &&
     loungeIndex !== undefined;
@@ -83,7 +89,26 @@ export function AgentPresence({
 
   useFrame((_, delta) => {
     if (!root.current) return;
+    if (bossActive(agent, Date.now())) {
+      if (travelling) setTravelling(false);
+      const dx = targetX - root.current.position.x;
+      const dz = targetZ - root.current.position.z;
+      const distance = Math.hypot(dx, dz);
+      const moving = !reducedMotion && distance > 0.08;
+      if (moving !== running) setRunning(moving);
+      const step = reducedMotion
+        ? 1
+        : Math.min(1, (Math.min(delta, 0.1) * 8) / Math.max(distance, 0.001));
+      root.current.position.x += dx * step;
+      root.current.position.z += dz * step;
+      root.current.position.y = targetY;
+      root.current.rotation.y = moving ? Math.atan2(dx, dz) : Math.PI;
+      initialized.current = true;
+      return;
+    }
+    if (running) setRunning(false);
     if (game) {
+      if (travelling) setTravelling(false);
       const position = gameVisitPosition(game, waterClock.current);
       const ahead = gameVisitPosition(game, waterClock.current + 0.05);
       root.current.position.set(...position);
@@ -94,6 +119,7 @@ export function AgentPresence({
       return;
     }
     if (visit) {
+      if (travelling) setTravelling(false);
       const position = waterVisitPosition(visit, waterClock.current);
       const ahead = waterVisitPosition(visit, waterClock.current + 0.05);
       root.current.position.set(...position);
@@ -109,13 +135,19 @@ export function AgentPresence({
       initialized.current = true;
       return;
     }
-    const blend = reducedMotion ? 1 : 1 - Math.exp(-delta * 2.4);
-    root.current.position.x = THREE.MathUtils.lerp(root.current.position.x, targetX, blend);
-    root.current.position.y = THREE.MathUtils.lerp(root.current.position.y, targetY, blend);
-    root.current.position.z = THREE.MathUtils.lerp(root.current.position.z, targetZ, blend);
+    const step = deskTravelStep(
+      root.current.position.x,
+      root.current.position.z,
+      targetX,
+      targetZ,
+      Math.min(delta, 0.1),
+      reducedMotion,
+    );
+    if (step.walking !== travelling) setTravelling(step.walking);
+    root.current.position.set(step.x, step.walking ? 0 : targetY, step.z);
     root.current.rotation.y = THREE.MathUtils.damp(
       root.current.rotation.y,
-      targetRotation,
+      step.walking ? step.rotation : targetRotation,
       reducedMotion ? 100 : 3.2,
       delta,
     );
@@ -137,12 +169,23 @@ export function AgentPresence({
         relaxing={isRelaxing}
         loungeVariant={loungeVariant}
         walking={Boolean(
-          (visit && visit.phase !== "drinking") || (game && game.phase !== "playing"),
+          travelling ||
+          (bossing && running) ||
+          (visit && visit.phase !== "drinking") ||
+          (game && game.phase !== "playing"),
         )}
+        bossing={bossing}
         playing={playing}
-        partying={partying}
+        partying={partying && !travelling}
         drinkingWater={visit?.phase === "drinking"}
       />
+      {bossing && labels && (
+        <OfficeLabel position={[0, 1, 0]} offset={1.1}>
+          <Text fontSize={0.17} color="#b11f4b" outlineWidth={0.01} outlineColor="#f3eee4">
+            {running ? "Boss! Look busy!" : "Definitely working!"}
+          </Text>
+        </OfficeLabel>
+      )}
       {partying && !reducedMotion && partyStart !== null && (
         <Confetti seed={`${agent.id}:${partyStart}`} startedAt={partyStart} />
       )}

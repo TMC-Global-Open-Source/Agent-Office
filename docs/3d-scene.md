@@ -50,6 +50,19 @@ couch seat and run the 14-second merge-party routine with confetti and a "Party 
 Water and game breaks are cancelled for the party. It is client-only (`secret-party.ts`): it
 changes no server state and only plays in the browser where it was typed.
 
+Typing `boss` outside a form field sends all currently idle agents sprinting to their
+desks to pretend to work: exaggerated keyboard flailing, head bobbing and fast-scrolling
+screens with a slow, low-contrast glow. After 15 seconds from the trigger they resume
+their usual activities. Typing it again restarts the timer. Completed agents relaxing in
+the lounge are included, just like `party`; working agents are not recruited and real work
+immediately takes priority. Like `party`, this is browser-only
+and changes no provider status. Reduced motion skips the sprint/flailing and screen pulsing,
+showing a static working pose instead.
+
+Travel between lounge seats and desks uses a steady walking pace with directional
+facing and swinging arms and legs. Agents stay standing during travel and switch to
+their seated activity only on arrival; reduced motion places them directly at the destination.
+
 Offline agents are out of the office: their avatars disappear, their desk monitors
 dim, and an Away marker remains. Roster/list entries show last-seen time. Desks stay
 reserved for the configured **Offline desk retention (hours)**, without extending
