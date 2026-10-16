@@ -426,7 +426,12 @@ export function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ color }),
       });
-      if (!response.ok) throw new Error("Agent color could not be saved.");
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: { message?: string };
+        };
+        throw new Error(payload.error?.message ?? "Agent color could not be saved.");
+      }
       const result = (await response.json()) as { data: Agent };
       const current = useOfficeStore.getState().agents.find((item) => item.id === agent.id);
       if (current)
@@ -675,7 +680,12 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
-      if (!response.ok) throw new Error("Settings were not saved.");
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: { message?: string };
+        };
+        throw new Error(payload.error?.message ?? "Settings were not saved.");
+      }
       const result = (await response.json()) as { data: AppConfig };
       setConfig(result.data);
       state.setOfficeTitle(result.data.officeTitle);

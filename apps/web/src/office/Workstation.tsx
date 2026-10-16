@@ -18,6 +18,12 @@ export interface DeskData {
   active: boolean;
 }
 
+function darkenHex(hex: string, factor: number): string {
+  const value = Number.parseInt(hex.replace("#", ""), 16);
+  const channel = (shift: number) => Math.round(((value >> shift) & 0xff) * factor);
+  return `rgb(${channel(16)}, ${channel(8)}, ${channel(0)})`;
+}
+
 export const Workstation = memo(function Workstation({
   agent,
   desk,
@@ -147,18 +153,42 @@ export const Workstation = memo(function Workstation({
         />
       </mesh>
       <group position={[0, 0.15, 0.95]} rotation={[0, Math.PI, 0]}>
-        <mesh position={[0, 0.825, 0]}>
-          <boxGeometry args={[0.58, 0.48, 0.07]} />
+        <mesh position={[0, 0.9, -0.2]} rotation={[-0.08, 0, 0]} castShadow>
+          <boxGeometry args={[0.5, 0.5, 0.07]} />
           <meshStandardMaterial color="#536a68" />
         </mesh>
-        <mesh position={[0, 0.3, -0.08]}>
-          <boxGeometry args={[0.1, 0.42, 0.1]} />
+        <mesh position={[0, 0.6, -0.2]}>
+          <boxGeometry args={[0.08, 0.2, 0.05]} />
+          <meshStandardMaterial color="#33403f" />
+        </mesh>
+        <mesh position={[0, 0.54, 0.02]} castShadow>
+          <boxGeometry args={[0.54, 0.09, 0.48]} />
           <meshStandardMaterial color="#536a68" />
         </mesh>
-        <mesh position={[0, 0.54, 0.04]}>
-          <boxGeometry args={[0.54, 0.09, 0.4]} />
-          <meshStandardMaterial color="#536a68" />
+        <mesh position={[0, 0.21, 0.02]}>
+          <cylinderGeometry args={[0.035, 0.035, 0.58, 8]} />
+          <meshStandardMaterial color="#9aa6a5" metalness={0.4} roughness={0.4} />
         </mesh>
+        <mesh position={[0, -0.08, 0.02]}>
+          <cylinderGeometry args={[0.06, 0.06, 0.05, 8]} />
+          <meshStandardMaterial color="#33403f" />
+        </mesh>
+        {[0, 1, 2, 3].map((leg) => (
+          <group
+            key={leg}
+            position={[0, -0.08, 0.02]}
+            rotation={[0, Math.PI / 4 + (leg * Math.PI) / 2, 0]}
+          >
+            <mesh position={[0.16, 0, 0]}>
+              <boxGeometry args={[0.32, 0.035, 0.05]} />
+              <meshStandardMaterial color="#33403f" />
+            </mesh>
+            <mesh position={[0.31, -0.035, 0]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.035, 0.035, 0.04, 10]} />
+              <meshStandardMaterial color="#1f2827" />
+            </mesh>
+          </group>
+        ))}
       </group>
       {labels && (
         <OfficeLabel position={[0, 1.2, 0]} offset={sideView ? 0 : 1} offsetX={sideView ? 1.8 : 0}>
@@ -177,11 +207,11 @@ export const Workstation = memo(function Workstation({
           </Text>
           <Text
             position={[0, 0, 0]}
-            fontSize={0.16}
-            color={statusColors[agent.status]}
+            fontSize={0.19}
+            color={darkenHex(statusColors[agent.status], 0.65)}
             anchorX="center"
             maxWidth={1.9}
-            outlineWidth={0.008}
+            outlineWidth={0.01}
             outlineColor="#f3eee4"
           >
             {agent.status === "working"

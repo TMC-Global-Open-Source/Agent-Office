@@ -1,8 +1,8 @@
-import { coolerPosition } from "./water-cooler.js";
+import { coolerDrinkingRotation, coolerPosition } from "./water-cooler.js";
 
 export function WaterCooler() {
   return (
-    <group position={coolerPosition}>
+    <group position={coolerPosition} rotation={[0, coolerDrinkingRotation, 0]}>
       <mesh position={[0, 0.58, 0]} castShadow>
         <boxGeometry args={[0.65, 1.16, 0.6]} />
         <meshStandardMaterial color="#eee1cb" roughness={0.7} />

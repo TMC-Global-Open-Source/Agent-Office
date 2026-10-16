@@ -36,6 +36,14 @@ The scheduler uses the full idle roster and bounded frame time, so filters do no
 cancel breaks and hidden tabs do not fast-forward them. Reduced-motion mode suppresses
 visits and retains static couch poses. Breaks are visual only and do not modify provider status.
 
+`GameCorner` places an arcade cabinet and a pinball table left of the lounge; the water cooler stands beside the left sofa, facing the room.
+`game-room.ts` sends lounge agents (idle or completed) to play, one player per machine,
+first after 12–32 / 18–43 seconds and then 35–80 seconds after each return. Players walk
+the side aisle, play for 14–24 seconds with joystick/button or flipper poses synced to the
+machine animation (invaders and ship on the arcade screen; ball, bumpers, and flippers on
+the table), then return to their couch seat. An agent on a water break is never chosen,
+new work cancels the game, and reduced-motion mode suppresses game breaks.
+
 Offline agents are out of the office: their avatars disappear, their desk monitors
 dim, and an Away marker remains. Roster/list entries show last-seen time. Desks stay
 reserved for the configured **Offline desk retention (hours)**, without extending

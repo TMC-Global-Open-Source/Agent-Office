@@ -1,6 +1,8 @@
 param(
     [switch]$NoBrowser,
-    [switch]$Foreground
+    [switch]$Foreground,
+    # Listen on the network so other computers can view the office (read-only for them).
+    [switch]$Share
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +18,50 @@ function Get-OfficeHealth([string]$url) {
             throw "The configured port is serving another application. Close it or change PORT in .env."
         }
         return $null
+    }
+}
+
+function Get-NetworkUrls([int]$port) {
+    try {
+        # Prefer real network adapters (those with a default gateway) over virtual switches.
+        $addresses = @(Get-NetIPConfiguration -ErrorAction Stop |
+            Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } |
+            ForEach-Object { $_.IPv4Address.IPAddress })
+        if (-not $addresses.Count) {
+            $addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+                Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+                ForEach-Object { $_.IPAddress })
+        }
+        @("http://$($env:COMPUTERNAME):$port") + ($addresses | ForEach-Object { "http://${_}:$port" })
+    } catch {
+        @("http://$($env:COMPUTERNAME):$port")
+    }
+}
+
+function Enable-OfficeFirewallRule([int]$port) {
+    $ruleName = "Copilot Agent Office (TCP $port)"
+    try {
+        if (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue) { return $true }
+        $identity = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+        if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { return $false }
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $port `
+            -Action Allow -Profile Private, Domain | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Write-ShareInfo([int]$port) {
+    $urls = @(Get-NetworkUrls $port)
+    Write-Host ''
+    Write-Host 'Sharing is on. Other computers on your network can view the office (read-only) at:'
+    $urls | ForEach-Object { Write-Host "  $_" }
+    if (-not (Enable-OfficeFirewallRule $port)) {
+        Write-Host ''
+        Write-Host "If other computers cannot connect, allow inbound TCP port $port in Windows Firewall"
+        Write-Host '(run this launcher once as administrator to add the rule automatically, or accept'
+        Write-Host 'the Windows Firewall prompt for Node.js on private networks).'
     }
 }
 
@@ -35,25 +81,29 @@ try {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($value) { $settings[$name] = $value }
     }
-    $bindHost = if ($settings.HOST) { $settings.HOST } else { '127.0.0.1' }
-    if ($bindHost -notin @('127.0.0.1', 'localhost', '::1')) {
-        throw 'The desktop launcher requires a loopback HOST in .env (127.0.0.1, localhost, or ::1).'
-    }
+    $bindHost = if ($Share) { '0.0.0.0' } elseif ($settings.HOST) { $settings.HOST } else { '127.0.0.1' }
+    $loopbackHosts = @('127.0.0.1', 'localhost', '::1')
+    $sharing = $bindHost -notin $loopbackHosts
     $port = if ($settings.PORT) { [int]$settings.PORT } else { 4000 }
     $webPort = if ($settings.WEB_PORT) { [int]$settings.WEB_PORT } else { 5173 }
     if ($port -lt 1 -or $port -gt 65535 -or $webPort -lt 1 -or $webPort -gt 65535) {
         throw 'PORT and WEB_PORT must be between 1 and 65535.'
     }
-    $urlHost = if ($bindHost -eq '::1') { '[::1]' } else { $bindHost }
+    # Health checks and the local browser always use loopback; wildcard binds include it.
+    $urlHost = if ($bindHost -eq '::1') { '[::1]' } elseif ($bindHost -in @('0.0.0.0', '::', '[::]')) { '127.0.0.1' } else { $bindHost }
     $apiUrl = "http://${urlHost}:$port"
     $health = Get-OfficeHealth $apiUrl
     if ($health) {
         if ($health.application -ne 'copilot-agent-office') {
             throw 'The configured API port is already occupied. Close that application and retry.'
         }
+        if ($sharing -and -not $health.shared) {
+            throw 'Agent Office is already running without sharing. Run Stop-Agent-Office.cmd, then launch again with sharing.'
+        }
         $dashboardUrl = if ($health.mode -eq 'production') { $apiUrl } else { "http://${urlHost}:$webPort" }
         if (-not $NoBrowser) { Start-Process $dashboardUrl }
         Write-Host "Agent Office is already running at $dashboardUrl"
+        if ($health.shared) { Write-ShareInfo $port }
         exit 0
     }
     $entry = Join-Path $root 'apps\server\dist\index.js'
@@ -61,6 +111,7 @@ try {
         throw 'Built application files are missing. Run Build-Agent-Office.cmd (or Install-Agent-Office.cmd for first setup).'
     }
     $env:NODE_ENV = 'production'
+    $env:HOST = $bindHost
     $stateDir = Join-Path $root '.agent-office'
     if ($Foreground) {
         $process = Start-Process -FilePath $node.Source -ArgumentList @("`"$entry`"") -WorkingDirectory $root -NoNewWindow -PassThru
@@ -91,6 +142,7 @@ try {
     if (-not $NoBrowser) { Start-Process $apiUrl }
     Write-Host ''
     Write-Host "Agent Office is running at $apiUrl"
+    if ($sharing) { Write-ShareInfo $port }
     if ($backgroundReady) {
         Write-Host 'Running in the background. Use Stop-Agent-Office.cmd to stop it.'
         exit 0

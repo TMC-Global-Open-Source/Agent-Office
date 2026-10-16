@@ -7,7 +7,13 @@ import type { Agent } from "@agent-office/shared";
 import type { DeskData } from "./Workstation.js";
 import { AgentAvatar } from "./AgentAvatar.js";
 import { livingRoomSeat } from "./LivingRoom.js";
-import { waterVisitPosition, type WaterVisit } from "./water-cooler.js";
+import { coolerDrinkingRotation, waterVisitPosition, type WaterVisit } from "./water-cooler.js";
+import { gameVisitPosition, playerRotation, type GameVisit } from "./game-room.js";
+
+const gameLabels = {
+  arcade: { outbound: "Heading to the arcade", playing: "Playing arcade" },
+  pinball: { outbound: "Heading to pinball", playing: "Playing pinball" },
+};
 
 export function AgentPresence({
   agent,
@@ -17,6 +23,7 @@ export function AgentPresence({
   reducedMotion,
   onSelect,
   waterVisit = null,
+  gameVisit = null,
   waterClock,
   loungeVariant,
   labels,
@@ -28,6 +35,7 @@ export function AgentPresence({
   reducedMotion: boolean;
   onSelect: () => void;
   waterVisit?: WaterVisit | null;
+  gameVisit?: GameVisit | null;
   waterClock: MutableRefObject<number>;
   loungeVariant?: number;
   labels: boolean;
@@ -37,7 +45,9 @@ export function AgentPresence({
   const atLounge =
     (agent.status === "idle" || agent.status === "completed") && loungeIndex !== undefined;
   const visit = atLounge && !reducedMotion ? waterVisit : null;
-  const isRelaxing = atLounge && !visit;
+  const game = atLounge && !reducedMotion && !visit ? gameVisit : null;
+  const isRelaxing = atLounge && !visit && !game;
+  const playing = game?.phase === "playing" ? game.machine : null;
   const seat = atLounge ? livingRoomSeat(loungeIndex) : null;
   const targetX = seat?.[0] ?? (desk.column - 2) * 3.15;
   const targetY = seat?.[1] ?? 0.17;
@@ -46,11 +56,21 @@ export function AgentPresence({
 
   useFrame((_, delta) => {
     if (!root.current) return;
+    if (game) {
+      const position = gameVisitPosition(game, waterClock.current);
+      const ahead = gameVisitPosition(game, waterClock.current + 0.05);
+      root.current.position.set(...position);
+      if (game.phase === "playing") root.current.rotation.y = playerRotation;
+      else if (Math.hypot(ahead[0] - position[0], ahead[2] - position[2]) > 0.001)
+        root.current.rotation.y = Math.atan2(ahead[0] - position[0], ahead[2] - position[2]);
+      initialized.current = true;
+      return;
+    }
     if (visit) {
       const position = waterVisitPosition(visit, waterClock.current);
       const ahead = waterVisitPosition(visit, waterClock.current + 0.05);
       root.current.position.set(...position);
-      if (visit.phase === "drinking") root.current.rotation.y = 0;
+      if (visit.phase === "drinking") root.current.rotation.y = coolerDrinkingRotation;
       else if (Math.hypot(ahead[0] - position[0], ahead[2] - position[2]) > 0.001)
         root.current.rotation.y = Math.atan2(ahead[0] - position[0], ahead[2] - position[2]);
       initialized.current = true;
@@ -89,9 +109,30 @@ export function AgentPresence({
         reducedMotion={reducedMotion}
         relaxing={isRelaxing}
         loungeVariant={loungeVariant}
-        walking={Boolean(visit && visit.phase !== "drinking")}
+        walking={Boolean(
+          (visit && visit.phase !== "drinking") || (game && game.phase !== "playing"),
+        )}
+        playing={playing}
         drinkingWater={visit?.phase === "drinking"}
       />
+      {game && labels && (
+        <OfficeLabel position={[0, 1, 0]} offset={1.1}>
+          <Text
+            fontSize={0.15}
+            color="#526b72"
+            outlineWidth={0.008}
+            outlineColor="#f3eee4"
+            maxWidth={2.8}
+            textAlign="center"
+          >
+            {agent.displayName}
+            {"\n"}
+            {game.phase === "returning"
+              ? "Back to the couch"
+              : gameLabels[game.machine][game.phase]}
+          </Text>
+        </OfficeLabel>
+      )}
       {visit && labels && (
         <OfficeLabel position={[0, 1, 0]} offset={1.1}>
           <Text

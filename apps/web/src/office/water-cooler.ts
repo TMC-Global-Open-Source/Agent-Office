@@ -1,7 +1,9 @@
 import { livingRoomSeat } from "./LivingRoom.js";
 
-export const coolerPosition: [number, number, number] = [-5.8, 0, -3.4];
-export const coolerStandingPosition: [number, number, number] = [-5.8, 0, -4.15];
+/** The cooler stands beside the left sofa in the lounge, with its taps facing the room (+z). */
+export const coolerPosition: [number, number, number] = [-4.75, 0, -6.6];
+export const coolerStandingPosition: [number, number, number] = [-4.75, 0, -5.85];
+export const coolerDrinkingRotation = Math.PI;
 export type VisitPhase = "outbound" | "drinking" | "returning";
 export interface WaterVisit {
   agentId: string;
@@ -17,7 +19,12 @@ export interface WaterBreakState {
 }
 export function waterRoute(seatIndex: number): Array<[number, number, number]> {
   const [x, , z] = livingRoomSeat(seatIndex);
-  return [[x, 0, z], [x, 0, z + 1.2], [-4.8, 0, z + 1.2], [-4.8, 0, -4.15], coolerStandingPosition];
+  return [
+    [x, 0, z],
+    [x, 0, z + 1.2],
+    [coolerStandingPosition[0], 0, z + 1.2],
+    coolerStandingPosition,
+  ];
 }
 function distance(a: number[], b: number[]) {
   return Math.hypot(a[0]! - b[0]!, a[2]! - b[2]!);

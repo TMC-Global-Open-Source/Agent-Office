@@ -39,6 +39,12 @@ export const provider: AgentProvider =
     : env.AGENT_PROVIDER === "local"
       ? localHooksProvider
       : mockProvider;
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase().replace(/^::ffff:/, "");
+  return normalized === "localhost" || normalized === "::1" || normalized.startsWith("127.");
+}
+
 export const app = express();
 let io: Server | null = null;
 let lastSuccessfulRefresh: string | null = null;
@@ -89,6 +95,24 @@ app.use(
 );
 app.use(cors({ origin: [`http://127.0.0.1:${env.WEB_PORT}`, `http://localhost:${env.WEB_PORT}`] }));
 app.use(express.json({ limit: "64kb" }));
+// When the office is shared on the network, other computers may view status but only the
+// host computer may change settings, colors, demo events, or submit lifecycle hooks.
+app.use((request, response, next) => {
+  if (
+    request.method === "GET" ||
+    request.method === "HEAD" ||
+    request.method === "OPTIONS" ||
+    request.path === "/api/v1/refresh" ||
+    isLoopbackAddress(request.socket.remoteAddress)
+  )
+    return next();
+  return response.status(403).json({
+    error: {
+      code: "VIEW_ONLY",
+      message: "This office is view-only from other computers. Make changes on the host computer.",
+    },
+  });
+});
 app.use((request, _response, next) => {
   console.info(JSON.stringify({ level: "info", method: request.method, path: request.path }));
   next();
@@ -389,6 +413,7 @@ app.get("/api/v1/health", async (_request, response, next) => {
       data: {
         application: "copilot-agent-office",
         mode: env.NODE_ENV,
+        shared: !isLoopbackAddress(env.HOST),
         healthy: health.healthy,
         provider: { ...health, lastSuccessAt },
         lastSuccessfulRefresh: lastSuccessfulRefresh ?? lastSuccessAt,

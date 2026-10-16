@@ -7,6 +7,7 @@ import { loungePersonality, loungePose } from "./lounge-animation.js";
 import { TypingArms } from "./TypingArms.js";
 import { activityPose } from "./activity-animation.js";
 import { statusPose } from "./status-animation.js";
+import { arcadeInput, pinballFlips, type GameMachine } from "./game-room.js";
 
 export function AgentAvatar({
   agent,
@@ -16,6 +17,7 @@ export function AgentAvatar({
   loungeVariant,
   walking = false,
   drinkingWater = false,
+  playing = null,
 }: {
   agent: Agent;
   selected: boolean;
@@ -24,6 +26,7 @@ export function AgentAvatar({
   loungeVariant?: number;
   walking?: boolean;
   drinkingWater?: boolean;
+  playing?: GameMachine | null;
 }) {
   const root = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
@@ -54,6 +57,28 @@ export function AgentAvatar({
     }
     if (leftFoot.current) leftFoot.current.rotation.x = 0;
     if (rightFoot.current) rightFoot.current.rotation.x = 0;
+    if (playing) {
+      const time = reducedMotion ? 0 : clock.elapsedTime;
+      if (playing === "arcade") {
+        const input = arcadeInput(time);
+        if (leftArm.current) leftArm.current.rotation.set(-1.05, 0, -input.stickX * 0.18);
+        if (rightArm.current) rightArm.current.rotation.set(-1.05 + input.button * 0.18, 0, 0.05);
+        if (body.current) body.current.rotation.z = input.stickX * 0.05;
+        if (head.current) head.current.rotation.set(-0.08, input.stickX * 0.06, 0);
+      } else {
+        const flips = pinballFlips(time);
+        if (leftArm.current) leftArm.current.rotation.set(-0.95 + flips.left * 0.22, 0, 0.12);
+        if (rightArm.current) rightArm.current.rotation.set(-0.95 + flips.right * 0.22, 0, -0.12);
+        if (body.current) {
+          body.current.rotation.x = 0.12 + (flips.left + flips.right) * 0.03;
+          body.current.rotation.z = (flips.right - flips.left) * 0.06;
+        }
+        if (head.current) head.current.rotation.set(0.3, Math.sin(time * 2.3) * 0.15, 0);
+      }
+      if (!reducedMotion && body.current)
+        body.current.position.y += Math.abs(Math.sin(time * 4)) * 0.015;
+      return;
+    }
     if (walking || drinkingWater) {
       const stride = reducedMotion ? 0 : Math.sin(clock.elapsedTime * 7) * 0.3;
       if (leftFoot.current) leftFoot.current.rotation.x = walking ? stride : 0;
@@ -138,9 +163,9 @@ export function AgentAvatar({
     <group
       ref={root}
       position={[
-        isWorking || walking || drinkingWater ? 0 : 0.25,
+        isWorking || walking || drinkingWater || playing ? 0 : 0.25,
         agent.status === "needs_attention" ? 0.32 : 0,
-        walking || drinkingWater ? 0 : 0.15,
+        walking || drinkingWater || playing ? 0 : 0.15,
       ]}
       scale={agent.status === "spawning" ? 0.92 : 1}
     >
