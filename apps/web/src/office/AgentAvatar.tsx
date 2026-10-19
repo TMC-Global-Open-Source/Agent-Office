@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Agent } from "@agent-office/shared";
@@ -10,6 +10,7 @@ import { statusPose } from "./status-animation.js";
 import { arcadeInput, pinballFlips, type GameMachine } from "./game-room.js";
 import { partyElapsed, partyPose } from "./party-animation.js";
 import { bossPose } from "./boss-mode.js";
+import { couchPose } from "./couch-motion.js";
 
 export function AgentAvatar({
   agent,
@@ -24,6 +25,9 @@ export function AgentAvatar({
   bossing = false,
   homeDesk = false,
   carryingCoffee = false,
+  brewingCoffee = false,
+  couchAmount,
+  couchTransitioning = false,
 }: {
   agent: Agent;
   selected: boolean;
@@ -37,6 +41,9 @@ export function AgentAvatar({
   bossing?: boolean;
   homeDesk?: boolean;
   carryingCoffee?: boolean;
+  brewingCoffee?: boolean;
+  couchAmount?: MutableRefObject<number>;
+  couchTransitioning?: boolean;
 }) {
   const root = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
@@ -45,15 +52,31 @@ export function AgentAvatar({
   const body = useRef<THREE.Group>(null);
   const leftFoot = useRef<THREE.Group>(null);
   const rightFoot = useRef<THREE.Group>(null);
+  const leftLeg = useRef<THREE.Group>(null);
+  const rightLeg = useRef<THREE.Group>(null);
   const offline = agent.status === "offline";
   const isRelaxing =
     !walking && !partying && relaxing && (agent.status === "idle" || agent.status === "completed");
-  const isWorking = !walking && !partying && (agent.status === "working" || bossing || homeDesk);
+  const isWorking =
+    !walking &&
+    !partying &&
+    !couchTransitioning &&
+    (agent.status === "working" || bossing || homeDesk);
   const activity = getOfficeActivity(agent);
   const idleVariant = loungeVariant ?? loungePersonality(agent.id).variant;
 
   useFrame(({ clock }) => {
     const elapsed = Math.max(0, (Date.now() - Date.parse(agent.updatedAt)) / 1000);
+    const couch = couchPose(couchAmount?.current ?? (isRelaxing ? 1 : 0));
+    const seated = isWorking && !couchTransitioning ? 1 : couch.blend;
+    if (root.current && agent.status !== "spawning") {
+      root.current.position.x = couchAmount
+        ? 0.25 * couch.blend
+        : isWorking || walking || drinkingWater || playing || partying
+          ? 0
+          : 0.25;
+      root.current.position.z = isWorking ? 0.15 : 0.15 * couch.blend;
+    }
     if (root.current && agent.status === "spawning" && !reducedMotion) {
       const progress = THREE.MathUtils.clamp(elapsed / 1.4, 0, 1);
       root.current.position.x = 0.25 - (1 - progress) * 0.55;
@@ -64,10 +87,37 @@ export function AgentAvatar({
     if (head.current) head.current.rotation.set(0, 0, 0);
     if (body.current) {
       body.current.rotation.set(0, 0, 0);
-      body.current.position.y = 0.7;
+      body.current.position.y = 0.7 + 0.18 * (1 - seated);
     }
-    if (leftFoot.current) leftFoot.current.rotation.x = 0;
-    if (rightFoot.current) rightFoot.current.rotation.x = 0;
+    if (leftLeg.current) leftLeg.current.rotation.x = (-Math.PI / 2) * seated;
+    if (rightLeg.current) rightLeg.current.rotation.x = (-Math.PI / 2) * seated;
+    if (leftFoot.current) leftFoot.current.rotation.x = (Math.PI / 2) * seated;
+    if (rightFoot.current) rightFoot.current.rotation.x = (Math.PI / 2) * seated;
+    if (couch.blend > 0) {
+      const pose = loungePose(agent.id, clock.elapsedTime, reducedMotion, idleVariant);
+      if (body.current) {
+        body.current.rotation.x = pose.bodyX * couch.blend + couch.lean;
+        body.current.position.y += pose.bodyY * couch.blend;
+      }
+      head.current?.rotation.set(
+        pose.headX * couch.blend + couch.lean * 0.3,
+        pose.headY * couch.blend,
+        0,
+      );
+      leftArm.current?.rotation.set(
+        pose.leftArmX * couch.blend + couch.lean,
+        0,
+        pose.leftArmZ * couch.blend,
+      );
+      rightArm.current?.rotation.set(
+        pose.rightArmX * couch.blend + couch.lean,
+        0,
+        pose.rightArmZ * couch.blend,
+      );
+      if (leftFoot.current) leftFoot.current.rotation.x += pose.footX * couch.blend;
+      if (rightFoot.current) rightFoot.current.rotation.x -= pose.footX * couch.blend;
+      return;
+    }
     if (partying) {
       const partyAt = partyElapsed(agent, Date.now());
       const pose = partyPose(partyAt ?? 0, reducedMotion);
@@ -78,8 +128,8 @@ export function AgentAvatar({
         body.current.position.y += pose.bodyY;
         body.current.rotation.set(pose.bodyX, 0, pose.bodyZ);
       }
-      if (leftFoot.current) leftFoot.current.rotation.x = pose.leftFoot;
-      if (rightFoot.current) rightFoot.current.rotation.x = pose.rightFoot;
+      if (leftLeg.current) leftLeg.current.rotation.x = pose.leftFoot;
+      if (rightLeg.current) rightLeg.current.rotation.x = pose.rightFoot;
       return;
     }
     if (playing) {
@@ -104,12 +154,20 @@ export function AgentAvatar({
         body.current.position.y += Math.abs(Math.sin(time * 4)) * 0.015;
       return;
     }
+    if (brewingCoffee) {
+      rightArm.current?.rotation.set(-1.15, 0, -0.08);
+      leftArm.current?.rotation.set(-0.25, 0, 0.08);
+      head.current?.rotation.set(0.2, 0, 0);
+      return;
+    }
     if (walking || drinkingWater) {
       const stride = reducedMotion
         ? 0
         : Math.sin(clock.elapsedTime * (bossing ? 16 : 7)) * (bossing ? 0.8 : 0.3);
-      if (leftFoot.current) leftFoot.current.rotation.x = walking ? stride : 0;
-      if (rightFoot.current) rightFoot.current.rotation.x = walking ? -stride : 0;
+      if (leftLeg.current) leftLeg.current.rotation.x = walking ? stride : 0;
+      if (rightLeg.current) rightLeg.current.rotation.x = walking ? -stride : 0;
+      if (leftFoot.current) leftFoot.current.rotation.x = walking ? Math.max(0, -stride) * 0.7 : 0;
+      if (rightFoot.current) rightFoot.current.rotation.x = walking ? Math.max(0, stride) * 0.7 : 0;
       if (leftArm.current) leftArm.current.rotation.x = walking ? -stride : 0.12;
       if (rightArm.current)
         rightArm.current.rotation.x = carryingCoffee ? -0.9 : drinkingWater ? -1.8 : stride;
@@ -127,19 +185,6 @@ export function AgentAvatar({
       rightArm.current?.rotation.set(pose.rightX, 0, pose.rightZ);
       head.current?.rotation.set(pose.headX, 0, 0);
       body.current?.rotation.set(pose.bodyX, 0, pose.bodyZ);
-      return;
-    }
-    if (isRelaxing) {
-      const pose = loungePose(agent.id, clock.elapsedTime, reducedMotion, idleVariant);
-      if (body.current) {
-        body.current.rotation.x = pose.bodyX;
-        body.current.position.y += pose.bodyY;
-      }
-      if (head.current) head.current.rotation.set(pose.headX, pose.headY, 0);
-      if (leftArm.current) leftArm.current.rotation.set(pose.leftArmX, 0, pose.leftArmZ);
-      if (rightArm.current) rightArm.current.rotation.set(pose.rightArmX, 0, pose.rightArmZ);
-      if (leftFoot.current) leftFoot.current.rotation.x = pose.footX;
-      if (rightFoot.current) rightFoot.current.rotation.x = -pose.footX;
       return;
     }
     if (isWorking) {
@@ -210,7 +255,7 @@ export function AgentAvatar({
       ]}
       scale={agent.status === "spawning" ? 0.92 : 1}
     >
-      <group ref={body} position={[0, 0.7, 0]}>
+      <group ref={body} name="avatar-body" position={[0, 0.7, 0]}>
         <group position={[0, -0.7, 0]}>
           <mesh position={[0, 0.93, 0]} castShadow>
             <boxGeometry args={[0.38, 0.48, 0.25]} />
@@ -289,8 +334,10 @@ export function AgentAvatar({
               <boxGeometry args={[0.11, 0.13, 0.13]} />
               <meshStandardMaterial color="#e5bd97" />
             </mesh>
-            {(carryingCoffee || drinkingWater || (isRelaxing && idleVariant === 1)) && (
-              <group position={[0.02, -0.41, 0.08]}>
+            {(carryingCoffee ||
+              drinkingWater ||
+              (isRelaxing && !couchTransitioning && idleVariant === 1)) && (
+              <group name="coffee-mug" position={[0.02, -0.41, 0.08]}>
                 <mesh castShadow>
                   <cylinderGeometry args={[0.075, 0.06, 0.13, 10]} />
                   <meshStandardMaterial color="#eee1cb" />
@@ -302,7 +349,7 @@ export function AgentAvatar({
               </group>
             )}
           </group>
-          {isRelaxing && idleVariant === 0 && (
+          {isRelaxing && !couchTransitioning && idleVariant === 0 && (
             <group position={[0, 0.82, 0.36]} rotation={[-0.3, 0, 0]}>
               {[-1, 1].map((side) => (
                 <group key={side} position={[side * 0.12, 0, 0]} rotation={[0, 0, side * 0.15]}>
@@ -319,36 +366,26 @@ export function AgentAvatar({
             </group>
           )}
           {[-0.11, 0.11].map((x) => (
-            <group key={x} position={[x, 0.55, 0]}>
-              {isRelaxing || isWorking ? (
-                <>
-                  <mesh position={[0, 0.02, 0.16]} castShadow>
-                    <boxGeometry args={[0.14, 0.16, 0.38]} />
-                    {limbMaterial}
-                  </mesh>
-                  <group ref={x < 0 ? leftFoot : rightFoot} position={[0, 0.02, 0.34]}>
-                    <mesh position={[0, -0.18, 0]} castShadow>
-                      <boxGeometry args={[0.14, 0.36, 0.16]} />
-                      {limbMaterial}
-                    </mesh>
-                    <mesh position={[0, -0.38, 0.06]}>
-                      <boxGeometry args={[0.15, 0.08, 0.23]} />
-                      {limbMaterial}
-                    </mesh>
-                  </group>
-                </>
-              ) : (
-                <group ref={x < 0 ? leftFoot : rightFoot}>
-                  <mesh position={[0, -0.14, 0]} castShadow>
-                    <boxGeometry args={[0.14, 0.38, 0.16]} />
-                    {limbMaterial}
-                  </mesh>
-                  <mesh position={[0, -0.37, 0.06]}>
-                    <boxGeometry args={[0.15, 0.08, 0.23]} />
-                    {limbMaterial}
-                  </mesh>
-                </group>
-              )}
+            <group
+              key={x}
+              name={x < 0 ? "left-thigh" : "right-thigh"}
+              ref={x < 0 ? leftLeg : rightLeg}
+              position={[x, 0.55, 0]}
+            >
+              <mesh position={[0, -0.17, 0]} castShadow>
+                <boxGeometry args={[0.14, 0.34, 0.16]} />
+                {limbMaterial}
+              </mesh>
+              <group ref={x < 0 ? leftFoot : rightFoot} position={[0, -0.34, 0]}>
+                <mesh position={[0, -0.18, 0]} castShadow>
+                  <boxGeometry args={[0.14, 0.36, 0.16]} />
+                  {limbMaterial}
+                </mesh>
+                <mesh position={[0, -0.36, 0.06]}>
+                  <boxGeometry args={[0.15, 0.08, 0.23]} />
+                  {limbMaterial}
+                </mesh>
+              </group>
             </group>
           ))}
         </group>

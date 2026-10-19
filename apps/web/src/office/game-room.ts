@@ -1,4 +1,5 @@
 import { livingRoomSeat } from "./LivingRoom.js";
+import { couchRiseDuration, couchTravelTime } from "./couch-motion.js";
 
 export type GameMachine = "arcade" | "pinball";
 export const gameMachines: GameMachine[] = ["arcade", "pinball"];
@@ -56,6 +57,7 @@ function distance(a: number[], b: number[]) {
 export function gameTravelDuration(seatIndex: number, machine: GameMachine) {
   const route = gameRoute(seatIndex, machine);
   return (
+    couchRiseDuration +
     route.slice(1).reduce((total, point, i) => total + distance(route[i]!, point), 0) / walkSpeed
   );
 }
@@ -64,7 +66,9 @@ export function gameVisitPosition(visit: GameVisit, now: number): [number, numbe
   const route = gameRoute(visit.seatIndex, visit.machine);
   if (visit.phase === "returning") route.reverse();
   if (now - visit.startedAt >= visit.duration - 1e-9) return [...route[route.length - 1]!];
-  let remaining = Math.max(0, Math.min(visit.duration, now - visit.startedAt)) * walkSpeed;
+  let remaining =
+    couchTravelTime(Math.min(visit.duration, now - visit.startedAt), visit.phase === "outbound") *
+    walkSpeed;
   for (let i = 1; i < route.length; i++) {
     const start = route[i - 1]!;
     const end = route[i]!;

@@ -1,5 +1,5 @@
 import type { DeskData } from "./Workstation.js";
-import { coolerPosition } from "./water-cooler.js";
+import { coffeePosition, coolerPosition } from "./water-cooler.js";
 import { machinePositions } from "./game-room.js";
 
 export type FloorPoint = [number, number];
@@ -8,6 +8,7 @@ export interface FurnitureBounds {
   maxX: number;
   minZ: number;
   maxZ: number;
+  seat?: FloorPoint;
 }
 
 const clearance = 0.3;
@@ -20,15 +21,14 @@ function bounds(x: number, z: number, width: number, depth: number): FurnitureBo
   };
 }
 
-export function homeObstacles(
-  desks: DeskData[],
-  seats: number,
-  decorations: boolean,
-): FurnitureBounds[] {
+export function homeObstacles(desks: DeskData[], seats: number): FurnitureBounds[] {
   const obstacles = desks.flatMap((desk) => {
     const x = (desk.column - 2) * 3.15;
     const z = desk.row * 3.15;
-    return [bounds(x, z, 1.45, 0.8), bounds(x, z + 0.82, 0.8, 0.8)];
+    const desktop = bounds(x, z, 1.45, 0.8);
+    // Leave the seated approach at z + 0.65 clear of the tabletop's front edge.
+    desktop.maxZ = z + 0.6;
+    return [desktop, { ...bounds(x, z + 0.82, 0.8, 0.8), seat: [x, z + 0.65] as FloorPoint }];
   });
   for (let bay = 0; bay < Math.max(1, Math.ceil(seats / 8)); bay++) {
     const z = -5.5 - bay * 5.2;
@@ -39,11 +39,12 @@ export function homeObstacles(
     );
   }
   obstacles.push(bounds(coolerPosition[0], coolerPosition[2], 0.65, 0.65));
+  obstacles.push(bounds(coffeePosition[0], coffeePosition[2] + 0.6, 0.9, 2.45));
+  obstacles.push(bounds(coffeePosition[0] - 0.95, coffeePosition[2] - 0.175, 1, 0.9));
   obstacles.push(
     bounds(machinePositions.arcade[0], machinePositions.arcade[2], 1.2, 1.1),
     bounds(machinePositions.pinball[0], machinePositions.pinball[2], 1.65, 0.9),
   );
-  if (decorations) obstacles.push(bounds(7, -4, 1.6, 0.55));
   return obstacles;
 }
 
@@ -76,6 +77,53 @@ export function crossesFurniture(a: FloorPoint, b: FloorPoint, rect: FurnitureBo
 
 /** Shortest clear route through furniture corners; standing up from a seat exits forward first. */
 export function clearHomeRoute(
+  from: FloorPoint,
+  to: FloorPoint,
+  obstacles: FurnitureBounds[],
+): FloorPoint[] {
+  if (Math.hypot(to[0] - from[0], to[1] - from[1]) < 0.001) return [from, to];
+  const startChair = obstacles.find((rect) => rect.seat && contains(rect, from));
+  const endChair = obstacles.find((rect) => rect.seat && contains(rect, to));
+  const sidePoints = (point: FloorPoint, chair: FurnitureBounds | undefined): FloorPoint[] =>
+    chair
+      ? [
+          [chair.seat![0] - 1.1, point[1]],
+          [chair.seat![0] + 1.1, point[1]],
+        ]
+      : [point];
+  const candidates: FloorPoint[][] = [];
+  for (const start of sidePoints(from, startChair)) {
+    for (const end of sidePoints(to, endChair)) {
+      if (
+        obstacles.some(
+          (rect) =>
+            (startChair && rect !== startChair && crossesFurniture(from, start, rect)) ||
+            (endChair && rect !== endChair && crossesFurniture(end, to, rect)),
+        )
+      )
+        continue;
+      const route = clearFurnitureRoute(start, end, obstacles);
+      candidates.push([...(startChair ? [from] : []), ...route, ...(endChair ? [to] : [])]);
+    }
+  }
+  if (!candidates.length)
+    throw new Error("No clear side approach to the workstation is available.");
+  return candidates.reduce((shortest, route) =>
+    routeLength(route) < routeLength(shortest) ? route : shortest,
+  );
+}
+
+export function routeLength(route: FloorPoint[]) {
+  return route
+    .slice(1)
+    .reduce(
+      (total, point, index) =>
+        total + Math.hypot(point[0] - route[index]![0], point[1] - route[index]![1]),
+      0,
+    );
+}
+
+function clearFurnitureRoute(
   from: FloorPoint,
   to: FloorPoint,
   obstacles: FurnitureBounds[],

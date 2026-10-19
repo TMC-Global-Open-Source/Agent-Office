@@ -13,6 +13,7 @@ import { MathUtils, OrthographicCamera } from "three";
 import { subagentLayout } from "./subagent-layout.js";
 import { SubagentTeams } from "./SubagentTeams.js";
 import { WaterCooler } from "./WaterCooler.js";
+import { CoffeeMaker } from "./CoffeeMaker.js";
 import { GameCorner } from "./GameCorner.js";
 import {
   advanceGameRoom,
@@ -22,7 +23,12 @@ import {
   initialGameRoom,
   type GameRoomState,
 } from "./game-room.js";
-import { advanceWaterBreak, coolerStandingPosition, type WaterBreakState } from "./water-cooler.js";
+import {
+  advanceWaterBreak,
+  coffeeStation,
+  coolerStandingPosition,
+  type WaterBreakState,
+} from "./water-cooler.js";
 import { loungePersonality } from "./lounge-animation.js";
 import { officeViews, type OfficeView } from "./camera-views.js";
 import { useOfficeStore } from "../store.js";
@@ -44,7 +50,6 @@ function Scene({
   selectedId,
   onSelect,
   labels,
-  decorations,
   shadows,
   performanceMode,
   reducedMotion,
@@ -86,6 +91,9 @@ function Scene({
   const waterClock = useRef(0);
   const waterState = useRef<WaterBreakState>({ visit: null, nextAt: null, variants: {} });
   const [waterBreak, setWaterBreak] = useState(waterState.current);
+  const coffeeState = useRef<WaterBreakState>({ visit: null, nextAt: null, variants: {} });
+  const [coffeeBreak, setCoffeeBreak] = useState(coffeeState.current);
+  const [loungeVariants, setLoungeVariants] = useState<Record<string, number>>({});
   const gameState = useRef<GameRoomState>(initialGameRoom());
   const [gameRoom, setGameRoom] = useState(gameState.current);
   const saveCamera = () => {
@@ -127,8 +135,8 @@ function Scene({
   }, [view, resetRef]);
   const layout = useMemo(() => subagentLayout(allAgents, desks), [allAgents, desks]);
   const departureFurniture = useMemo(
-    () => homeObstacles(layout.desks, allAgents.length, decorations && !performanceMode),
-    [layout.desks, allAgents.length, decorations, performanceMode],
+    () => homeObstacles(layout.desks, allAgents.length),
+    [layout.desks, allAgents.length],
   );
   const byDesk = useMemo(() => new Map(layout.desks.map((desk) => [desk.agentId, desk])), [layout]);
   const selectedDesk = selectedId ? byDesk.get(selectedId) : undefined;
@@ -192,26 +200,51 @@ function Scene({
     const withoutPartiers = (seats: Map<string, number>) =>
       partiers.size ? new Map([...seats].filter(([id]) => !partiers.has(id))) : seats;
     const gamers = gameVisitors(gameState.current);
+    const coffeeGuest = coffeeState.current.visit?.agentId;
     const next = advanceWaterBreak(
       waterState.current,
       waterClock.current,
       withoutPartiers(
-        gamers.size ? new Map([...fullIdleSeats].filter(([id]) => !gamers.has(id))) : fullIdleSeats,
+        new Map([...fullIdleSeats].filter(([id]) => !gamers.has(id) && id !== coffeeGuest)),
       ),
       reducedMotion,
       (id) => loungePersonality(id).variant,
     );
     if (next !== waterState.current) {
+      const previous = waterState.current;
       waterState.current = next;
       setWaterBreak(next);
+      if (next.variants !== previous.variants && previous.visit) {
+        const id = previous.visit.agentId;
+        setLoungeVariants((variants) => ({ ...variants, [id]: next.variants[id]! }));
+      }
     }
     const water = waterState.current.visit?.agentId;
+    const nextCoffee = advanceWaterBreak(
+      coffeeState.current,
+      waterClock.current,
+      withoutPartiers(
+        new Map([...loungeIndexByAgent].filter(([id]) => !gamers.has(id) && id !== water)),
+      ),
+      reducedMotion,
+      (id) => loungePersonality(id).variant,
+      Math.random,
+      coffeeStation,
+    );
+    if (nextCoffee !== coffeeState.current) {
+      const previousVariants = coffeeState.current.variants;
+      coffeeState.current = nextCoffee;
+      setCoffeeBreak(nextCoffee);
+      if (nextCoffee.variants !== previousVariants && coffeeGuest)
+        setLoungeVariants((variants) => ({ ...variants, [coffeeGuest]: 1 }));
+    }
+    const coffee = coffeeState.current.visit?.agentId;
     const nextGame = advanceGameRoom(
       gameState.current,
       waterClock.current,
       withoutPartiers(loungeIndexByAgent),
       reducedMotion,
-      new Set(water ? [water] : []),
+      new Set([water, coffee].filter((id): id is string => id !== undefined)),
     );
     if (nextGame !== gameState.current) {
       gameState.current = nextGame;
@@ -227,11 +260,13 @@ function Scene({
     const [x, , z] =
       waterBreak.visit?.agentId === selectedId
         ? coolerStandingPosition
-        : selectedGame
-          ? gameStandingPositions[selectedGame]
-          : selectedLoungeIndex !== undefined
-            ? livingRoomSeat(selectedLoungeIndex)
-            : [(selectedDesk!.column - 2) * 3.15, 0, selectedDesk!.row * 3.15];
+        : coffeeBreak.visit?.agentId === selectedId
+          ? coffeeStation.standing
+          : selectedGame
+            ? gameStandingPositions[selectedGame]
+            : selectedLoungeIndex !== undefined
+              ? livingRoomSeat(selectedLoungeIndex)
+              : [(selectedDesk!.column - 2) * 3.15, 0, selectedDesk!.row * 3.15];
     const amount = Math.min(1, delta * 1.6);
     const dx = (x - controls.current.target.x) * amount;
     const dz = (z - controls.current.target.z) * amount;
@@ -281,16 +316,12 @@ function Scene({
           position={[0, -0.02, 0]}
         />
       )}
-      {decorations && !performanceMode && (
-        <>
-          <mesh position={[7, 0.4, -4]}>
-            <boxGeometry args={[1.6, 0.75, 0.55]} />
-            <meshStandardMaterial color="#9e886f" />
-          </mesh>
-        </>
-      )}
       <LivingRoom seatCount={allAgents.length} />
       <WaterCooler />
+      <CoffeeMaker
+        brewing={coffeeBreak.visit?.phase === "drinking"}
+        reducedMotion={reducedMotion}
+      />
       <GameCorner
         arcadePlaying={gameRoom.visits.arcade?.phase === "playing"}
         pinballPlaying={gameRoom.visits.pinball?.phase === "playing"}
@@ -332,13 +363,14 @@ function Scene({
             departureFurniture={departureFurniture}
             loungeIndex={loungeIndexByAgent.get(agent.id)}
             waterVisit={waterBreak.visit?.agentId === agent.id ? waterBreak.visit : null}
+            coffeeVisit={coffeeBreak.visit?.agentId === agent.id ? coffeeBreak.visit : null}
             gameVisit={
               gameMachines
                 .map((machine) => gameRoom.visits[machine])
                 .find((visit) => visit?.agentId === agent.id) ?? null
             }
             waterClock={waterClock}
-            loungeVariant={waterBreak.variants[agent.id]}
+            loungeVariant={loungeVariants[agent.id]}
             labels={labels}
             selected={selectedId === agent.id}
             reducedMotion={reducedMotion}
