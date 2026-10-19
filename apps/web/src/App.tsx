@@ -413,6 +413,26 @@ export function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => 
   const [color, setColor] = useState(agent.avatarColor);
   const [savingColor, setSavingColor] = useState(false);
   const [colorMessage, setColorMessage] = useState("");
+  const [sendingHome, setSendingHome] = useState(false);
+  const [homeError, setHomeError] = useState("");
+  const sendHome = async () => {
+    setSendingHome(true);
+    setHomeError("");
+    try {
+      const response = await fetch(`/api/v1/agents/${encodeURIComponent(agent.id)}/home`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { data?: Agent; error?: { message?: string } };
+      if (!response.ok || !payload.data)
+        throw new Error(payload.error?.message ?? "Agent could not be sent home.");
+      useOfficeStore.getState().upsertAgent(payload.data);
+      onClose();
+    } catch (error) {
+      setHomeError(error instanceof Error ? error.message : "Agent could not be sent home.");
+    } finally {
+      setSendingHome(false);
+    }
+  };
   useEffect(() => {
     setColor(agent.avatarColor);
   }, [agent.id, agent.avatarColor]);
@@ -523,6 +543,22 @@ export function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => 
         <span className="inference-badge">{agent.statusKind}</span>
       </div>
       <p className="detail-reason">{agent.statusReason ?? "No status explanation is available."}</p>
+      <button
+        className="toolbar-button"
+        disabled={sendingHome || Boolean(agent.metadata.homeDeparture)}
+        onClick={() => void sendHome()}
+      >
+        {agent.metadata.homeDeparture
+          ? "Heading home..."
+          : sendingHome
+            ? "Sending home..."
+            : "Send home"}
+      </button>
+      <p className="detail-reason">
+        Clears this agent's desk after it leaves. New work brings it back automatically; its session
+        is not stopped.
+      </p>
+      {homeError && <p role="alert">{homeError}</p>}
       <form className="agent-color-settings" onSubmit={(event) => void saveColor(event)}>
         <label>
           Avatar color

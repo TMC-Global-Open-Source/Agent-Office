@@ -30,6 +30,9 @@ import { agentDisplayName } from "../agent-name.js";
 import { belongsInLounge } from "./lounge-eligibility.js";
 import { partyElapsed, partyStartedAt } from "./party-animation.js";
 import { useSecretParty } from "./secret-party.js";
+import { bossActive, bossDurationMs, bossEligible } from "./boss-mode.js";
+import { homeDeparture, homeElapsed, homeTimeline } from "@agent-office/shared";
+import { homeObstacles } from "./home-route.js";
 
 const defaultZoom = 50;
 
@@ -123,6 +126,10 @@ function Scene({
     controls.current.update();
   }, [view, resetRef]);
   const layout = useMemo(() => subagentLayout(allAgents, desks), [allAgents, desks]);
+  const departureFurniture = useMemo(
+    () => homeObstacles(layout.desks, allAgents.length, decorations && !performanceMode),
+    [layout.desks, allAgents.length, decorations, performanceMode],
+  );
   const byDesk = useMemo(() => new Map(layout.desks.map((desk) => [desk.agentId, desk])), [layout]);
   const selectedDesk = selectedId ? byDesk.get(selectedId) : undefined;
   const loungeIndexByAgent = useMemo(() => {
@@ -162,14 +169,25 @@ function Scene({
     [loungeIndexByAgent, allAgents],
   );
   const partyHosts = useMemo(
-    () => allAgents.filter((agent) => partyStartedAt(agent) !== null),
+    () =>
+      allAgents.filter(
+        (agent) =>
+          partyStartedAt(agent) !== null || agent.metadata?.bossAt || homeDeparture(agent) !== null,
+      ),
     [allAgents],
   );
   useFrame((_, delta) => {
     waterClock.current += Math.min(delta, 0.1);
     const now = Date.now();
     const partiers = new Set(
-      partyHosts.filter((agent) => partyElapsed(agent, now) !== null).map((agent) => agent.id),
+      partyHosts
+        .filter(
+          (agent) =>
+            partyElapsed(agent, now) !== null ||
+            bossActive(agent, now) ||
+            homeDeparture(agent) !== null,
+        )
+        .map((agent) => agent.id),
     );
     const withoutPartiers = (seats: Map<string, number>) =>
       partiers.size ? new Map([...seats].filter(([id]) => !partiers.has(id))) : seats;
@@ -286,6 +304,7 @@ function Scene({
       />
       <JanitorEncounter allIdle={allIdle} reducedMotion={reducedMotion} labels={labels} />
       {agents.map((agent) => {
+        if ((homeElapsed(agent, Date.now()) ?? -1) >= homeTimeline.gone) return null;
         const desk = byDesk.get(agent.id);
         if (!desk) return null;
         return (
@@ -302,6 +321,7 @@ function Scene({
         );
       })}
       {agents.map((agent) => {
+        if ((homeElapsed(agent, Date.now()) ?? -1) >= homeTimeline.exit) return null;
         const desk = byDesk.get(agent.id);
         if (!desk) return null;
         return (
@@ -309,6 +329,7 @@ function Scene({
             key={agent.id}
             agent={agent}
             desk={desk}
+            departureFurniture={departureFurniture}
             loungeIndex={loungeIndexByAgent.get(agent.id)}
             waterVisit={waterBreak.visit?.agentId === agent.id ? waterBreak.visit : null}
             gameVisit={
@@ -360,22 +381,44 @@ export function OfficeScene(props: {
   const allAgentsRef = useRef(props.allAgents);
   allAgentsRef.current = props.allAgents;
   const [officeParty, setOfficeParty] = useState<{ at: string; guests: Set<string> } | null>(null);
-  useSecretParty(() => {
-    const now = Date.now();
-    const guests = allAgentsRef.current.filter((agent) => belongsInLounge(agent, now));
-    if (guests.length)
-      setOfficeParty({
-        at: new Date(now).toISOString(),
-        guests: new Set(guests.map((agent) => agent.id)),
-      });
-  });
+  const [boss, setBoss] = useState<{ at: string; guests: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!boss) return;
+    const timer = window.setTimeout(
+      () => setBoss(null),
+      Math.max(0, Date.parse(boss.at) + bossDurationMs - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [boss]);
+  useSecretParty(
+    () => {
+      const now = Date.now();
+      const guests = allAgentsRef.current.filter((agent) => belongsInLounge(agent, now));
+      if (guests.length) {
+        setBoss(null);
+        setOfficeParty({
+          at: new Date(now).toISOString(),
+          guests: new Set(guests.map((agent) => agent.id)),
+        });
+      }
+    },
+    () => {
+      const now = Date.now();
+      const guests = allAgentsRef.current.filter((agent) => bossEligible(agent, now));
+      if (!guests.length) return;
+      setOfficeParty(null);
+      setBoss({ at: new Date().toISOString(), guests: new Set(guests.map((agent) => agent.id)) });
+    },
+  );
   const displayAgents = (agents: Agent[]) =>
     agents.map((agent) => ({
       ...agent,
       displayName: agentDisplayName(agent, showSource),
-      metadata: officeParty?.guests.has(agent.id)
-        ? { ...agent.metadata, officeParty: officeParty.at }
-        : agent.metadata,
+      metadata: {
+        ...agent.metadata,
+        ...(officeParty?.guests.has(agent.id) ? { officeParty: officeParty.at } : {}),
+        ...(boss?.guests.has(agent.id) ? { bossAt: boss.at } : {}),
+      },
     }));
   return (
     <Canvas
