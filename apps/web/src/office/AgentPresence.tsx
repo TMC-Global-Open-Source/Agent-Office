@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import { OfficeLabel } from "./OfficeLabel.js";
@@ -19,6 +19,13 @@ import {
 import { Confetti } from "./Confetti.js";
 import { bossActive } from "./boss-mode.js";
 import { deskTravelStep } from "./desk-travel.js";
+import { homeDeparture, homeElapsed, homeTimeline } from "@agent-office/shared";
+import {
+  clearHomeRoute,
+  sampleHomeRoute,
+  type FloorPoint,
+  type FurnitureBounds,
+} from "./home-route.js";
 
 const gameLabels = {
   arcade: { outbound: "Heading to the arcade", playing: "Playing arcade" },
@@ -37,6 +44,7 @@ export function AgentPresence({
   waterClock,
   loungeVariant,
   labels,
+  departureFurniture,
 }: {
   agent: Agent;
   desk: DeskData;
@@ -49,11 +57,35 @@ export function AgentPresence({
   waterClock: MutableRefObject<number>;
   loungeVariant?: number;
   labels: boolean;
+  departureFurniture: FurnitureBounds[];
 }) {
   const root = useRef<THREE.Group>(null);
   const initialized = useRef(false);
   const [running, setRunning] = useState(false);
   const [travelling, setTravelling] = useState(false);
+  const [homeClock, setHomeClock] = useState(Date.now);
+  const homeStart = homeDeparture(agent);
+  const leaving = homeStart !== null;
+  const homeTime = homeElapsed(agent, homeClock) ?? -1;
+  const homeOrigin = useRef<THREE.Vector3 | null>(null);
+  const furnitureVersion = useMemo(() => JSON.stringify(departureFurniture), [departureFurniture]);
+  const homeRoutes = useRef<{
+    inbound: FloorPoint[];
+    outbound: FloorPoint[];
+    plannedAt: number;
+    furnitureVersion: string;
+  } | null>(null);
+  useEffect(() => {
+    homeOrigin.current = null;
+    homeRoutes.current = null;
+    if (homeStart === null) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setHomeClock(now);
+      if (now >= homeStart + homeTimeline.gone * 1000) window.clearInterval(timer);
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [homeStart]);
   const [partyClock, setPartyClock] = useState(Date.now);
   const partyStart = partyStartedAt(agent);
   useEffect(() => {
@@ -66,10 +98,11 @@ export function AgentPresence({
     return () => window.clearTimeout(timer);
   }, [partyStart, partyClock]);
   const now = Math.max(partyClock, Date.now());
-  const bossing = bossActive(agent, now);
-  const partying = !bossing && partyElapsed(agent, now) !== null;
+  const bossing = !leaving && bossActive(agent, now);
+  const partying = !leaving && !bossing && partyElapsed(agent, now) !== null;
   const officeParty = officePartyActive(agent, now) && !mergePartyActive(agent, now);
   const atLounge =
+    !leaving &&
     !bossing &&
     (!partying || officeParty) &&
     (agent.status === "idle" || agent.status === "completed") &&
@@ -89,6 +122,74 @@ export function AgentPresence({
 
   useFrame((_, delta) => {
     if (!root.current) return;
+    if (leaving) {
+      const elapsed = homeElapsed(agent, Date.now())!;
+      const deskPoint = new THREE.Vector3((desk.column - 2) * 3.15, 0, desk.row * 3.15 + 0.65);
+      if (!initialized.current) root.current.position.copy(deskPoint);
+      if (!homeOrigin.current)
+        homeOrigin.current = initialized.current
+          ? root.current.position.clone()
+          : deskPoint.clone();
+      if (!homeRoutes.current || homeRoutes.current.furnitureVersion !== furnitureVersion) {
+        if (homeRoutes.current) homeOrigin.current = root.current.position.clone();
+        const front: FloorPoint = [deskPoint.x, deskPoint.z + 1];
+        const left = Math.min(-9.5, ...departureFurniture.map((rect) => rect.minX)) - 0.5;
+        const right = Math.max(8.5, ...departureFurniture.map((rect) => rect.maxX)) + 0.5;
+        const exitX = Math.abs(front[0] - left) < Math.abs(front[0] - right) ? left : right;
+        homeRoutes.current = {
+          plannedAt: elapsed,
+          furnitureVersion,
+          inbound: clearHomeRoute(
+            [homeOrigin.current.x, homeOrigin.current.z],
+            front,
+            departureFurniture,
+          ),
+          outbound: clearHomeRoute(
+            elapsed >= homeTimeline.coffee
+              ? [root.current.position.x, root.current.position.z]
+              : [deskPoint.x, deskPoint.z],
+            [exitX, front[1]],
+            departureFurniture,
+          ),
+        };
+      }
+      if (elapsed < homeTimeline.desk) {
+        const progress = reducedMotion
+          ? 1
+          : THREE.MathUtils.clamp(
+              (elapsed - homeRoutes.current.plannedAt) /
+                Math.max(0.001, homeTimeline.desk - homeRoutes.current.plannedAt),
+              0,
+              1,
+            );
+        const point = sampleHomeRoute(homeRoutes.current.inbound, progress);
+        root.current.position.set(point.x, 0, point.z);
+        root.current.rotation.y = point.rotation;
+      } else if (elapsed < homeTimeline.coffee) {
+        root.current.position.copy(deskPoint);
+        root.current.position.y = 0.17;
+        root.current.rotation.y = Math.PI;
+      } else {
+        const progress = reducedMotion
+          ? 1
+          : THREE.MathUtils.clamp(
+              (elapsed - Math.max(homeTimeline.coffee, homeRoutes.current.plannedAt)) /
+                Math.max(
+                  0.001,
+                  homeTimeline.exit - Math.max(homeTimeline.coffee, homeRoutes.current.plannedAt),
+                ),
+              0,
+              1,
+            );
+        const point = sampleHomeRoute(homeRoutes.current.outbound, progress);
+        root.current.position.set(point.x, 0, point.z);
+        root.current.rotation.y = point.rotation;
+      }
+      root.current.visible = elapsed < homeTimeline.exit;
+      initialized.current = true;
+      return;
+    }
+    root.current.visible = true;
     if (bossActive(agent, Date.now())) {
       if (travelling) setTravelling(false);
       const dx = targetX - root.current.position.x;
@@ -153,7 +254,7 @@ export function AgentPresence({
     );
   });
 
-  if (agent.status === "offline") return null;
+  if (agent.status === "offline" && !leaving) return null;
   return (
     <group
       ref={root}
@@ -163,22 +264,40 @@ export function AgentPresence({
       }}
     >
       <AgentAvatar
-        agent={agent}
+        agent={leaving ? { ...agent, status: "idle" } : agent}
         selected={selected}
         reducedMotion={reducedMotion}
         relaxing={isRelaxing}
         loungeVariant={loungeVariant}
         walking={Boolean(
-          travelling ||
-          (bossing && running) ||
+          (leaving &&
+            !reducedMotion &&
+            (homeTime < homeTimeline.desk || homeTime >= homeTimeline.coffee)) ||
+          (!leaving && travelling) ||
+          (!leaving && bossing && running) ||
           (visit && visit.phase !== "drinking") ||
           (game && game.phase !== "playing"),
         )}
         bossing={bossing}
+        homeDesk={leaving && homeTime >= homeTimeline.desk && homeTime < homeTimeline.coffee}
+        carryingCoffee={leaving && homeTime >= homeTimeline.shutdown}
         playing={playing}
         partying={partying && !travelling}
         drinkingWater={visit?.phase === "drinking"}
       />
+      {leaving && labels && (
+        <OfficeLabel position={[0, 1, 0]} offset={1.1}>
+          <Text fontSize={0.17} color="#263c42" outlineWidth={0.01} outlineColor="#f3eee4">
+            {homeTime < homeTimeline.desk
+              ? "Heading home"
+              : homeTime < homeTimeline.shutdown
+                ? "Shutting down"
+                : homeTime < homeTimeline.coffee
+                  ? "Coffee to go!"
+                  : "See you next time!"}
+          </Text>
+        </OfficeLabel>
+      )}
       {bossing && labels && (
         <OfficeLabel position={[0, 1, 0]} offset={1.1}>
           <Text fontSize={0.17} color="#b11f4b" outlineWidth={0.01} outlineColor="#f3eee4">

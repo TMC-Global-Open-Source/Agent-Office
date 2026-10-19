@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
-import { app, isLoopbackAddress, prisma, syncAgents } from "../src/app.js";
+import { app, isLoopbackAddress, prisma, provider, syncAgents } from "../src/app.js";
+import * as usageAttribution from "../src/usage-attribution.js";
 
 describe("Agent Office API", () => {
   beforeEach(async () => {
@@ -56,6 +57,7 @@ describe("Agent Office API", () => {
         body: JSON.stringify({ color: "#123456" }),
       });
       expect(color.status).toBe(403);
+      expect((await fetch(`${base}/agents/any/home`, { method: "POST" })).status).toBe(403);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -215,5 +217,77 @@ describe("Agent Office API", () => {
     expect(response.body.data.tokensUsed).toBe(12345);
     await prisma.agent.update({ where: { id: agent!.id }, data: { tokensUsed: 0 } });
     expect((await syncAgents()).find((item) => item.id === agent!.id)?.tokensUsed).toBe(0);
+  });
+
+  it("sends an agent home, retains the dismissal through refreshes, and brings it back on fresh work", async () => {
+    const [initial] = await syncAgents();
+    const agent = {
+      ...initial!,
+      status: "idle" as const,
+      lastActivityAt: new Date(Date.now() - 120_000).toISOString(),
+    };
+    const lookup = vi.spyOn(provider, "fetchAgents").mockResolvedValue([agent]);
+    const emptyAttribution = usageAttribution.readUsageAttribution([], "", new Date(), null);
+    const attribution = vi
+      .spyOn(usageAttribution, "readUsageAttribution")
+      .mockReturnValue(emptyAttribution);
+    try {
+      const sent = await request(app).post(`/api/v1/agents/${agent.id}/home`).expect(200);
+      const startedAt = sent.body.data.metadata.homeDeparture.startedAt;
+      expect(sent.body.data.avatarColor).toBe(initial!.avatarColor);
+      await prisma.agent.update({ where: { id: agent.id }, data: { status: "offline" } });
+      await prisma.desk.update({
+        where: { agentId: agent.id },
+        data: {
+          active: false,
+          reservedUntil: new Date(Date.now() - 1000),
+        },
+      });
+      expect(
+        (await request(app).post(`/api/v1/agents/${agent.id}/home`)).body.data.metadata
+          .homeDeparture.startedAt,
+      ).toBe(startedAt);
+      expect(
+        (await syncAgents()).find((item) => item.id === agent.id)?.metadata.homeDeparture,
+      ).toEqual({ startedAt });
+      expect(await prisma.desk.findUnique({ where: { agentId: agent.id } })).not.toBeNull();
+
+      await prisma.agent.update({
+        where: { id: agent.id },
+        data: {
+          metadata: JSON.stringify({
+            ...agent.metadata,
+            homeDeparture: { startedAt: new Date(Date.now() - 30_000).toISOString() },
+          }),
+        },
+      });
+      expect((await syncAgents()).find((item) => item.id === agent.id)).toBeUndefined();
+      await request(app).get("/api/v1/usage/attribution").expect(200);
+      expect(attribution.mock.lastCall?.[0].some((item) => item.id === agent.id)).toBe(true);
+      expect(await prisma.desk.findUnique({ where: { agentId: agent.id } })).toBeNull();
+      expect(
+        (await request(app).get("/api/v1/agents")).body.data.some(
+          (item: { id: string }) => item.id === agent.id,
+        ),
+      ).toBe(false);
+      expect((await syncAgents()).find((item) => item.id === agent.id)).toBeUndefined();
+
+      lookup.mockResolvedValue([
+        {
+          ...agent,
+          status: "working",
+          lastActivityAt: new Date().toISOString(),
+          metadata: { ...agent.metadata, homeDeparture: { startedAt } },
+        },
+      ]);
+      const returned = (await syncAgents()).find((item) => item.id === agent.id)!;
+      expect(returned.metadata.homeDeparture).toBeUndefined();
+      expect(returned.avatarColor).toBe(initial!.avatarColor);
+      expect(returned.deskId).toBeTruthy();
+      await request(app).post("/api/v1/agents/missing/home").expect(404);
+    } finally {
+      lookup.mockRestore();
+      attribution.mockRestore();
+    }
   });
 });

@@ -38,6 +38,36 @@ const sample: Agent = {
 };
 
 describe("dashboard components", () => {
+  it("sends an agent home from its profile and reports request failures", async () => {
+    const onClose = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (url: string) =>
+        url.endsWith("/home")
+          ? {
+              ok: false,
+              json: async () => ({ error: { message: "Agent could not be sent home." } }),
+            }
+          : { ok: true, json: async () => ({ data: [] }) },
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    useOfficeStore.setState({ agents: [sample] });
+    render(<AgentDetails agent={sample} onClose={onClose} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send home" })));
+    expect(screen.getByRole("alert")).toHaveTextContent("Agent could not be sent home.");
+    expect(onClose).not.toHaveBeenCalled();
+    const dismissed = {
+      ...sample,
+      metadata: { homeDeparture: { startedAt: new Date().toISOString() } },
+    };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: dismissed }) });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send home" })));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/agents/demo/home", { method: "POST" });
+    expect(useOfficeStore.getState().agents[0]?.metadata.homeDeparture).toEqual(
+      dismissed.metadata.homeDeparture,
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
   it("shows folder totals and unattributed usage as separate non-additive breakdowns", () => {
     useOfficeStore.setState({
       usage: {

@@ -16,6 +16,9 @@ reset your database, overwrite an existing `.env`, or require administrator righ
 Double-click the shortcut (or `Launch-Agent-Office.cmd`) to start the built app and
 open your browser. The launcher runs the server in the background; its window can close.
 Use `Stop-Agent-Office.cmd` to stop the background server owned by this folder.
+Use `Restart-Agent-Office.cmd` to stop and relaunch it in one step. For network
+sharing, run `.\Restart-Agent-Office.cmd -Share`; add `-NoBrowser` to avoid opening
+another browser tab. Restart uses the existing build; it does not rebuild source changes.
 Logs are in `.agent-office\server.log` and `.agent-office\server-error.log`.
 For console debugging, run `.\Launch-Agent-Office.cmd -Foreground` and keep that window open.
 By default the built dashboard and API share **http://127.0.0.1:4000**.
@@ -154,6 +157,16 @@ arcade" / "Playing pinball"); reduced motion disables these breaks.
 When a local agent's pull request is merged, it parties at its desk for 14 seconds (jump,
 wave, floss, confetti); this needs the GitHub CLI signed in (`gh auth login`). See
 [docs/local-copilot-hooks.md](docs/local-copilot-hooks.md#pull-request-merge-party).
+To clear unwanted agents from the floor, click an agent and choose **Send home**.
+It walks to its desk, switches off the monitor, picks up its coffee and follows
+clear aisles around furniture to the office boundary, where it disappears;
+the desk and chair disappear in a puff of smoke. The departure takes about 20 seconds.
+This is a persistent office dismissal, not a command to stop the actual Copilot session.
+The agent stays hidden across refreshes and server restarts until it reports fresh work,
+then returns with its saved color and history. Sending home is available on the host PC;
+network viewers remain read-only.
+**Local Copilot History retains all token/credit totals, folder details and exact
+agent attribution**, including agents sent home.
 Attention uses a repeating 8-second wave-and-scan sequence until its status changes.
 Neither animation extends the configured waiting/idle timeout or blocks new work.
 Typing uses alternating raised keystrokes, lateral hand travel, wrist motion, and a subtle

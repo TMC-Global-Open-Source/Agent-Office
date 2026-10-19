@@ -22,6 +22,8 @@ export function AgentAvatar({
   playing = null,
   partying = false,
   bossing = false,
+  homeDesk = false,
+  carryingCoffee = false,
 }: {
   agent: Agent;
   selected: boolean;
@@ -33,6 +35,8 @@ export function AgentAvatar({
   playing?: GameMachine | null;
   partying?: boolean;
   bossing?: boolean;
+  homeDesk?: boolean;
+  carryingCoffee?: boolean;
 }) {
   const root = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
@@ -44,7 +48,7 @@ export function AgentAvatar({
   const offline = agent.status === "offline";
   const isRelaxing =
     !walking && !partying && relaxing && (agent.status === "idle" || agent.status === "completed");
-  const isWorking = !walking && !partying && (agent.status === "working" || bossing);
+  const isWorking = !walking && !partying && (agent.status === "working" || bossing || homeDesk);
   const activity = getOfficeActivity(agent);
   const idleVariant = loungeVariant ?? loungePersonality(agent.id).variant;
 
@@ -107,8 +111,14 @@ export function AgentAvatar({
       if (leftFoot.current) leftFoot.current.rotation.x = walking ? stride : 0;
       if (rightFoot.current) rightFoot.current.rotation.x = walking ? -stride : 0;
       if (leftArm.current) leftArm.current.rotation.x = walking ? -stride : 0.12;
-      if (rightArm.current) rightArm.current.rotation.x = drinkingWater ? -1.8 : stride;
+      if (rightArm.current)
+        rightArm.current.rotation.x = carryingCoffee ? -0.9 : drinkingWater ? -1.8 : stride;
       if (head.current && drinkingWater) head.current.rotation.x = -0.08;
+      return;
+    }
+    if (homeDesk) {
+      if (rightArm.current) rightArm.current.rotation.set(carryingCoffee ? -1.2 : -1.5, 0, -0.15);
+      if (head.current) head.current.rotation.x = 0.12;
       return;
     }
     if (bossing) {
@@ -224,32 +234,39 @@ export function AgentAvatar({
               <meshStandardMaterial color={accent} />
             </mesh>
           </group>
-          {isWorking && !bossing && (
+          {isWorking && !bossing && !homeDesk && (
             <TypingArms id={agent.id} reducedMotion={reducedMotion} activity={activity} />
           )}
-          {isWorking && !bossing && ["reading", "researching", "organizing"].includes(activity) && (
-            <group
-              position={[0, activity === "reading" ? 1.02 : 0.81, 0.35]}
-              rotation={[-0.25, 0, 0]}
-            >
-              {(activity === "organizing" ? [0, 1, 2] : [0]).map((page) => (
-                <mesh key={page} position={[page * 0.035, page * 0.02, 0]}>
-                  <boxGeometry args={[0.28, 0.012, 0.25]} />
-                  <meshStandardMaterial color="#f0dfc4" />
-                </mesh>
-              ))}
-              {[0, 1, 2].map((line) => (
-                <mesh
-                  key={line}
-                  position={[0, activity === "organizing" ? 0.051 : 0.008, -0.07 + line * 0.05]}
-                >
-                  <boxGeometry args={[0.17, 0.003, 0.006]} />
-                  <meshStandardMaterial color="#526b72" />
-                </mesh>
-              ))}
-            </group>
-          )}
-          <group ref={leftArm} position={[-0.24, 1.12, 0]} visible={!isWorking || bossing}>
+          {isWorking &&
+            !bossing &&
+            !homeDesk &&
+            ["reading", "researching", "organizing"].includes(activity) && (
+              <group
+                position={[0, activity === "reading" ? 1.02 : 0.81, 0.35]}
+                rotation={[-0.25, 0, 0]}
+              >
+                {(activity === "organizing" ? [0, 1, 2] : [0]).map((page) => (
+                  <mesh key={page} position={[page * 0.035, page * 0.02, 0]}>
+                    <boxGeometry args={[0.28, 0.012, 0.25]} />
+                    <meshStandardMaterial color="#f0dfc4" />
+                  </mesh>
+                ))}
+                {[0, 1, 2].map((line) => (
+                  <mesh
+                    key={line}
+                    position={[0, activity === "organizing" ? 0.051 : 0.008, -0.07 + line * 0.05]}
+                  >
+                    <boxGeometry args={[0.17, 0.003, 0.006]} />
+                    <meshStandardMaterial color="#526b72" />
+                  </mesh>
+                ))}
+              </group>
+            )}
+          <group
+            ref={leftArm}
+            position={[-0.24, 1.12, 0]}
+            visible={!isWorking || bossing || homeDesk}
+          >
             <mesh position={[-0.02, -0.18, 0]} castShadow>
               <boxGeometry args={[0.13, 0.38, 0.15]} />
               {limbMaterial}
@@ -259,7 +276,11 @@ export function AgentAvatar({
               <meshStandardMaterial color="#e5bd97" />
             </mesh>
           </group>
-          <group ref={rightArm} position={[0.24, 1.12, 0]} visible={!isWorking || bossing}>
+          <group
+            ref={rightArm}
+            position={[0.24, 1.12, 0]}
+            visible={!isWorking || bossing || homeDesk}
+          >
             <mesh position={[0.02, -0.18, 0]} castShadow>
               <boxGeometry args={[0.13, 0.38, 0.15]} />
               {limbMaterial}
@@ -268,7 +289,7 @@ export function AgentAvatar({
               <boxGeometry args={[0.11, 0.13, 0.13]} />
               <meshStandardMaterial color="#e5bd97" />
             </mesh>
-            {(drinkingWater || (isRelaxing && idleVariant === 1)) && (
+            {(carryingCoffee || drinkingWater || (isRelaxing && idleVariant === 1)) && (
               <group position={[0.02, -0.41, 0.08]}>
                 <mesh castShadow>
                   <cylinderGeometry args={[0.075, 0.06, 0.13, 10]} />

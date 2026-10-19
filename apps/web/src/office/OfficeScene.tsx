@@ -31,6 +31,8 @@ import { belongsInLounge } from "./lounge-eligibility.js";
 import { partyElapsed, partyStartedAt } from "./party-animation.js";
 import { useSecretParty } from "./secret-party.js";
 import { bossActive, bossDurationMs, bossEligible } from "./boss-mode.js";
+import { homeDeparture, homeElapsed, homeTimeline } from "@agent-office/shared";
+import { homeObstacles } from "./home-route.js";
 
 const defaultZoom = 50;
 
@@ -124,6 +126,10 @@ function Scene({
     controls.current.update();
   }, [view, resetRef]);
   const layout = useMemo(() => subagentLayout(allAgents, desks), [allAgents, desks]);
+  const departureFurniture = useMemo(
+    () => homeObstacles(layout.desks, allAgents.length, decorations && !performanceMode),
+    [layout.desks, allAgents.length, decorations, performanceMode],
+  );
   const byDesk = useMemo(() => new Map(layout.desks.map((desk) => [desk.agentId, desk])), [layout]);
   const selectedDesk = selectedId ? byDesk.get(selectedId) : undefined;
   const loungeIndexByAgent = useMemo(() => {
@@ -163,7 +169,11 @@ function Scene({
     [loungeIndexByAgent, allAgents],
   );
   const partyHosts = useMemo(
-    () => allAgents.filter((agent) => partyStartedAt(agent) !== null || agent.metadata?.bossAt),
+    () =>
+      allAgents.filter(
+        (agent) =>
+          partyStartedAt(agent) !== null || agent.metadata?.bossAt || homeDeparture(agent) !== null,
+      ),
     [allAgents],
   );
   useFrame((_, delta) => {
@@ -171,7 +181,12 @@ function Scene({
     const now = Date.now();
     const partiers = new Set(
       partyHosts
-        .filter((agent) => partyElapsed(agent, now) !== null || bossActive(agent, now))
+        .filter(
+          (agent) =>
+            partyElapsed(agent, now) !== null ||
+            bossActive(agent, now) ||
+            homeDeparture(agent) !== null,
+        )
         .map((agent) => agent.id),
     );
     const withoutPartiers = (seats: Map<string, number>) =>
@@ -289,6 +304,7 @@ function Scene({
       />
       <JanitorEncounter allIdle={allIdle} reducedMotion={reducedMotion} labels={labels} />
       {agents.map((agent) => {
+        if ((homeElapsed(agent, Date.now()) ?? -1) >= homeTimeline.gone) return null;
         const desk = byDesk.get(agent.id);
         if (!desk) return null;
         return (
@@ -305,6 +321,7 @@ function Scene({
         );
       })}
       {agents.map((agent) => {
+        if ((homeElapsed(agent, Date.now()) ?? -1) >= homeTimeline.exit) return null;
         const desk = byDesk.get(agent.id);
         if (!desk) return null;
         return (
@@ -312,6 +329,7 @@ function Scene({
             key={agent.id}
             agent={agent}
             desk={desk}
+            departureFurniture={departureFurniture}
             loungeIndex={loungeIndexByAgent.get(agent.id)}
             waterVisit={waterBreak.visit?.agentId === agent.id ? waterBreak.visit : null}
             gameVisit={

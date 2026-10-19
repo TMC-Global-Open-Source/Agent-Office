@@ -63,6 +63,30 @@ Travel between lounge seats and desks uses a steady walking pace with directiona
 facing and swinging arms and legs. Agents stay standing during travel and switch to
 their seated activity only on arrival; reduced motion places them directly at the destination.
 
+**Send home** in the agent profile starts a server-persisted departure. Shared
+`homeTimeline` milestones (seconds from the action) keep clients and cleanup aligned:
+walk to the desk by 5, shut off the monitor and collect the cup at 7, leave at 8,
+reach the nearest side boundary of the office by 18 and disappear immediately there,
+then puff the furniture away and remove the desk at 20.
+`home-route.ts` finds clear routes through expanded furniture corners, accounting for
+avatar width and all desks, chairs, sofas, coffee tables, game cabinets and the cooler.
+Agents first step forward out of their own seat, then use the aisles rather than
+cutting diagonally through furniture. Departure ends at the occupied office boundary,
+not the camera edge.
+`AgentPresence` faces the route while walking and carries the cup; `Workstation` hides its
+cup on pickup, switches off `MonitorScreen`, and renders `DepartureSmoke` at the old desk.
+Reduced motion skips walking and uses a static fading smoke cloud.
+
+`POST /api/v1/agents/:id/home` is host-only and idempotent during departure. The server
+stores `metadata.homeDeparture.startedAt`, suppresses provider refreshes for dismissed
+agents, deletes their desks after the goodbye, and compacts remaining desks. The agent
+record, color and history remain stored. Only a working/spawning provider observation
+with `lastActivityAt` newer than the dismissal clears it and allocates a new desk;
+ordinary polling and stale work do not. New work can interrupt a departure. Startup
+sync completes departures that elapsed while the server was stopped.
+Local Copilot History and usage attribution include dismissed agents; sending home
+never deletes usage records or moves their known usage into the unattributed bucket.
+
 Offline agents are out of the office: their avatars disappear, their desk monitors
 dim, and an Away marker remains. Roster/list entries show last-seen time. Desks stay
 reserved for the configured **Offline desk retention (hours)**, without extending

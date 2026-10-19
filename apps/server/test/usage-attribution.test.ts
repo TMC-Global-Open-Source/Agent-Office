@@ -78,6 +78,17 @@ describe("exact usage attribution", () => {
       null,
     );
     expect(result.available).toBe(true);
+    const afterGoingHome = readUsageAttribution(
+      [root, child, agent("vscode", "main", "vscode")].map((item) => ({
+        ...item,
+        deskId: null,
+        metadata: { ...item.metadata, homeDeparture: { startedAt: "2026-10-13T00:00:00Z" } },
+      })),
+      path,
+      new Date("2026-10-14T00:00:00Z"),
+      null,
+    );
+    expect(afterGoingHome).toEqual(result);
     expect(result.agents).toHaveLength(2);
     expect(result.agents.find((item) => item.agentId === root.id)).toMatchObject({
       inputTokens: 100,

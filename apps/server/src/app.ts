@@ -13,7 +13,13 @@ import {
   type Agent,
   type AppConfig,
 } from "@agent-office/shared";
-import { compactDesks, nextDesk } from "@agent-office/shared";
+import {
+  compactDesks,
+  nextDesk,
+  homeDeparture,
+  homeTimeline,
+  resumesFromHome,
+} from "@agent-office/shared";
 import { env, projectRoot } from "./env.js";
 import { z, ZodError } from "zod";
 import { MockAgentProvider } from "./providers/mock.js";
@@ -174,9 +180,14 @@ async function getStoredAgents(includeArchived = false): Promise<Agent[]> {
     include: { desk: true, avatar: true },
     orderBy: { createdAt: "asc" },
   });
-  return records
-    .map(publicAgent)
-    .filter((agent) => includeArchived || typeof agent.metadata.archivedAt !== "string");
+  return records.map(publicAgent).filter((agent) => {
+    if (includeArchived) return true;
+    const start = homeDeparture(agent);
+    return (
+      typeof agent.metadata.archivedAt !== "string" &&
+      (start === null || Date.now() < start + homeTimeline.gone * 1000)
+    );
+  });
 }
 
 /** Closes gaps left by removed desks so the remaining desks fill the top-left slots. */
@@ -207,6 +218,7 @@ async function performSyncAgents(): Promise<Agent[]> {
   });
   for (const desk of expiredDesks) {
     const agent = await prisma.agent.findUniqueOrThrow({ where: { id: desk.agentId } });
+    if (homeDeparture({ metadata: JSON.parse(agent.metadata) }) !== null) continue;
     await prisma.$transaction([
       prisma.agent.update({
         where: { id: agent.id },
@@ -228,9 +240,26 @@ async function performSyncAgents(): Promise<Agent[]> {
     include: { desk: true },
   });
   const incomingIds = new Set(incoming.map((agent) => agent.id));
+  let removedHomeDesk = false;
+  for (const old of known) {
+    const start = homeDeparture({ metadata: JSON.parse(old.metadata) });
+    const fresh = incoming.find((agent) => agent.id === old.id);
+    if (start === null || (fresh && resumesFromHome(fresh, start))) continue;
+    if (old.desk && Date.now() >= start + homeTimeline.gone * 1000) {
+      await prisma.desk.delete({ where: { id: old.desk.id } });
+      old.desk = null;
+      removedHomeDesk = true;
+      io?.emit("agent:removed", { id: old.id });
+    }
+  }
+  if (removedHomeDesk) await compactStoredDesks();
   const existingDesks = await prisma.desk.findMany();
   for (const agent of incoming) {
     const prior = known.find((item) => item.id === agent.id);
+    const start = prior ? homeDeparture({ metadata: JSON.parse(prior.metadata) }) : null;
+    if (start !== null && !resumesFromHome(agent, start)) continue;
+    // Provider snapshots may have been hydrated from persisted office metadata.
+    delete agent.metadata.homeDeparture;
     if (
       agent.status === "offline" &&
       prior &&
@@ -350,6 +379,7 @@ async function performSyncAgents(): Promise<Agent[]> {
   }
   const now = new Date();
   for (const old of known) {
+    if (homeDeparture({ metadata: JSON.parse(old.metadata) }) !== null) continue;
     if (!incomingIds.has(old.id) && old.status !== "offline") {
       await prisma.agent.update({
         where: { id: old.id },
@@ -406,6 +436,29 @@ async function performSyncAgents(): Promise<Agent[]> {
 
 let activeSync: Promise<Agent[]> | null = null;
 let localIdleTimer: ReturnType<typeof setTimeout> | null = null;
+let homeTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function scheduleHomeDeparture(): Promise<void> {
+  if (homeTimer) clearTimeout(homeTimer);
+  homeTimer = null;
+  const records = await prisma.agent.findMany({ where: { desk: { isNot: null } } });
+  const deadlines = records.flatMap((record) => {
+    const start = homeDeparture({ metadata: JSON.parse(record.metadata) });
+    return start === null ? [] : [start + homeTimeline.gone * 1000];
+  });
+  if (!deadlines.length) return;
+  homeTimer = setTimeout(
+    () => {
+      homeTimer = null;
+      void syncAgents().catch((error: unknown) => {
+        console.error("Agent home departure refresh failed.", error);
+        emitProviderFailure();
+      });
+    },
+    Math.max(1, Math.min(...deadlines) - Date.now()),
+  );
+  homeTimer.unref();
+}
 
 function scheduleLocalIdleTransition(): void {
   if (localIdleTimer) clearTimeout(localIdleTimer);
@@ -433,6 +486,7 @@ export async function syncAgents(): Promise<Agent[]> {
   try {
     const agents = await operation;
     scheduleLocalIdleTransition();
+    await scheduleHomeDeparture();
     return agents;
   } finally {
     if (activeSync === operation) activeSync = null;
@@ -465,7 +519,7 @@ app.get("/api/v1/usage/attribution", async (_request, response, next) => {
   try {
     response.json({
       data: readUsageAttribution(
-        await getStoredAgents(),
+        await getStoredAgents(true),
         env.COPILOT_USAGE_DB_PATH,
         undefined,
         vscodeUsagePath(),
@@ -551,6 +605,37 @@ app.put("/api/v1/agents/:id/color", async (request, response, next) => {
     });
     const data = publicAgent(updated);
     io?.emit("agent:updated", data);
+    return response.json({ data });
+  } catch (error) {
+    return next(error);
+  }
+});
+app.post("/api/v1/agents/:id/home", async (request, response, next) => {
+  try {
+    if (activeSync) await activeSync;
+    const agent = await prisma.agent.findUnique({
+      where: { id: request.params.id },
+      include: { desk: true, avatar: true },
+    });
+    if (!agent || !agent.desk || (provider.name === "local" && agent.source !== "local"))
+      return response
+        .status(404)
+        .json({ error: { code: "NOT_FOUND", message: "Agent not found in the office." } });
+    const metadata = JSON.parse(agent.metadata);
+    if (homeDeparture({ metadata }) !== null) return response.json({ data: publicAgent(agent) });
+    const updated = await prisma.agent.update({
+      where: { id: agent.id },
+      data: {
+        metadata: JSON.stringify({
+          ...metadata,
+          homeDeparture: { startedAt: new Date().toISOString() },
+        }),
+      },
+      include: { desk: true, avatar: true },
+    });
+    const data = publicAgent(updated);
+    io?.emit("agent:updated", data);
+    await scheduleHomeDeparture();
     return response.json({ data });
   } catch (error) {
     return next(error);
