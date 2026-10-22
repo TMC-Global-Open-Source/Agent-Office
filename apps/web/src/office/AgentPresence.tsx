@@ -7,7 +7,13 @@ import type { Agent } from "@agent-office/shared";
 import type { DeskData } from "./Workstation.js";
 import { AgentAvatar } from "./AgentAvatar.js";
 import { livingRoomSeat } from "./LivingRoom.js";
-import { coolerDrinkingRotation, waterVisitPosition, type WaterVisit } from "./water-cooler.js";
+import {
+  coffeeStation,
+  coffeeGuestRotation,
+  coolerDrinkingRotation,
+  waterVisitPosition,
+  type WaterVisit,
+} from "./water-cooler.js";
 import { gameVisitPosition, playerRotation, type GameVisit } from "./game-room.js";
 import {
   mergePartyActive,
@@ -18,7 +24,8 @@ import {
 } from "./party-animation.js";
 import { Confetti } from "./Confetti.js";
 import { bossActive } from "./boss-mode.js";
-import { deskTravelStep } from "./desk-travel.js";
+import { routeTravelStep } from "./desk-travel.js";
+import { advanceCouch, couchPose, couchRiseDuration, turnToward } from "./couch-motion.js";
 import { homeDeparture, homeElapsed, homeTimeline } from "@agent-office/shared";
 import {
   clearHomeRoute,
@@ -40,6 +47,7 @@ export function AgentPresence({
   reducedMotion,
   onSelect,
   waterVisit = null,
+  coffeeVisit = null,
   gameVisit = null,
   waterClock,
   loungeVariant,
@@ -53,6 +61,7 @@ export function AgentPresence({
   reducedMotion: boolean;
   onSelect: () => void;
   waterVisit?: WaterVisit | null;
+  coffeeVisit?: WaterVisit | null;
   gameVisit?: GameVisit | null;
   waterClock: MutableRefObject<number>;
   loungeVariant?: number;
@@ -69,6 +78,34 @@ export function AgentPresence({
   const homeTime = homeElapsed(agent, homeClock) ?? -1;
   const homeOrigin = useRef<THREE.Vector3 | null>(null);
   const furnitureVersion = useMemo(() => JSON.stringify(departureFurniture), [departureFurniture]);
+  const travelRoute = useRef<{ key: string; points: FloorPoint[]; waypoint: number } | null>(null);
+  const walkTo = (x: number, z: number, delta: number, speed = 2.8) => {
+    const position = root.current!.position;
+    const key = `${x}:${z}:${furnitureVersion}`;
+    if (!travelRoute.current || travelRoute.current.key !== key) {
+      travelRoute.current = {
+        key,
+        points: reducedMotion
+          ? [
+              [position.x, position.z],
+              [x, z],
+            ]
+          : clearHomeRoute([position.x, position.z], [x, z], departureFurniture),
+        waypoint: 1,
+      };
+    }
+    const step = routeTravelStep(
+      position.x,
+      position.z,
+      travelRoute.current.points,
+      travelRoute.current.waypoint,
+      Math.min(delta, 0.1),
+      reducedMotion,
+      speed,
+    );
+    travelRoute.current.waypoint = step.waypoint;
+    return step;
+  };
   const homeRoutes = useRef<{
     inbound: FloorPoint[];
     outbound: FloorPoint[];
@@ -107,9 +144,17 @@ export function AgentPresence({
     (!partying || officeParty) &&
     (agent.status === "idle" || agent.status === "completed") &&
     loungeIndex !== undefined;
-  const visit = atLounge && !partying && !reducedMotion ? waterVisit : null;
+  const gettingCoffee = Boolean(coffeeVisit && !waterVisit);
+  const visit = atLounge && !partying && !reducedMotion ? (waterVisit ?? coffeeVisit) : null;
   const game = atLounge && !partying && !reducedMotion && !visit ? gameVisit : null;
-  const isRelaxing = atLounge && !partying && !visit && !game;
+  const returnedToSeat = (trip: WaterVisit | GameVisit | null) =>
+    trip?.phase === "returning" &&
+    waterClock.current - trip.startedAt >= trip.duration - couchRiseDuration;
+  const isRelaxing =
+    atLounge && !partying && (!visit || returnedToSeat(visit)) && (!game || returnedToSeat(game));
+  const couchAmount = useRef(isRelaxing ? 1 : 0);
+  const [couchTransitioning, setCouchTransitioning] = useState(false);
+  const approachedCouch = useRef(isRelaxing);
   const playing = game?.phase === "playing" ? game.machine : null;
   const seat = atLounge ? livingRoomSeat(loungeIndex) : null;
   const targetX = seat?.[0] ?? (desk.column - 2) * 3.15;
@@ -122,7 +167,32 @@ export function AgentPresence({
 
   useFrame((_, delta) => {
     if (!root.current) return;
+    const nearSeat =
+      seat &&
+      Math.hypot(root.current.position.x - seat[0], root.current.position.z - seat[2]) < 0.08;
+    const relaxingNow =
+      atLounge && !partying && (!visit || returnedToSeat(visit)) && (!game || returnedToSeat(game));
+    const shouldSit = Boolean(relaxingNow && (!initialized.current || nearSeat));
+    const previousCouch = couchAmount.current;
+    couchAmount.current = advanceCouch(
+      previousCouch,
+      shouldSit,
+      Math.min(delta, 0.1),
+      reducedMotion,
+    );
+    const transitioning = couchAmount.current > 0 && couchAmount.current < 1;
+    if (transitioning !== couchTransitioning) setCouchTransitioning(transitioning);
+    if (previousCouch > 0 && !shouldSit && !reducedMotion) {
+      if (travelling) setTravelling(false);
+      if (running) setRunning(false);
+      root.current.position.y = 0.1 * couchPose(couchAmount.current).blend;
+      approachedCouch.current = false;
+      return;
+    }
+    if (!relaxingNow) approachedCouch.current = false;
+    else if (nearSeat) approachedCouch.current = true;
     if (leaving) {
+      travelRoute.current = null;
       const elapsed = homeElapsed(agent, Date.now())!;
       const deskPoint = new THREE.Vector3((desk.column - 2) * 3.15, 0, desk.row * 3.15 + 0.65);
       if (!initialized.current) root.current.position.copy(deskPoint);
@@ -141,7 +211,7 @@ export function AgentPresence({
           furnitureVersion,
           inbound: clearHomeRoute(
             [homeOrigin.current.x, homeOrigin.current.z],
-            front,
+            [deskPoint.x, deskPoint.z],
             departureFurniture,
           ),
           outbound: clearHomeRoute(
@@ -192,41 +262,66 @@ export function AgentPresence({
     root.current.visible = true;
     if (bossActive(agent, Date.now())) {
       if (travelling) setTravelling(false);
-      const dx = targetX - root.current.position.x;
-      const dz = targetZ - root.current.position.z;
-      const distance = Math.hypot(dx, dz);
-      const moving = !reducedMotion && distance > 0.08;
+      const step = walkTo(targetX, targetZ, delta, 8);
+      const moving = step.walking;
       if (moving !== running) setRunning(moving);
-      const step = reducedMotion
-        ? 1
-        : Math.min(1, (Math.min(delta, 0.1) * 8) / Math.max(distance, 0.001));
-      root.current.position.x += dx * step;
-      root.current.position.z += dz * step;
-      root.current.position.y = targetY;
-      root.current.rotation.y = moving ? Math.atan2(dx, dz) : Math.PI;
+      root.current.position.set(step.x, moving ? 0 : targetY, step.z);
+      root.current.rotation.y = moving ? step.rotation : Math.PI;
       initialized.current = true;
       return;
     }
     if (running) setRunning(false);
     if (game) {
+      travelRoute.current = null;
       if (travelling) setTravelling(false);
       const position = gameVisitPosition(game, waterClock.current);
       const ahead = gameVisitPosition(game, waterClock.current + 0.05);
-      root.current.position.set(...position);
+      root.current.position.set(
+        position[0],
+        returnedToSeat(game) ? 0.1 * couchPose(couchAmount.current).blend : position[1],
+        position[2],
+      );
       if (game.phase === "playing") root.current.rotation.y = playerRotation;
-      else if (Math.hypot(ahead[0] - position[0], ahead[2] - position[2]) > 0.001)
-        root.current.rotation.y = Math.atan2(ahead[0] - position[0], ahead[2] - position[2]);
+      else if (Math.hypot(ahead[0] - position[0], ahead[2] - position[2]) > 0.001) {
+        const backingIn =
+          game.phase === "returning" &&
+          seat &&
+          Math.abs(position[0] - seat[0]) < 0.01 &&
+          Math.abs(position[2] - seat[2]) < 1.2;
+        root.current.rotation.y = turnToward(
+          root.current.rotation.y,
+          backingIn ? 0 : Math.atan2(ahead[0] - position[0], ahead[2] - position[2]),
+          delta,
+        );
+      }
       initialized.current = true;
       return;
     }
     if (visit) {
+      travelRoute.current = null;
       if (travelling) setTravelling(false);
-      const position = waterVisitPosition(visit, waterClock.current);
-      const ahead = waterVisitPosition(visit, waterClock.current + 0.05);
-      root.current.position.set(...position);
-      if (visit.phase === "drinking") root.current.rotation.y = coolerDrinkingRotation;
-      else if (Math.hypot(ahead[0] - position[0], ahead[2] - position[2]) > 0.001)
-        root.current.rotation.y = Math.atan2(ahead[0] - position[0], ahead[2] - position[2]);
+      const station = gettingCoffee ? coffeeStation : undefined;
+      const position = waterVisitPosition(visit, waterClock.current, station);
+      const ahead = waterVisitPosition(visit, waterClock.current + 0.05, station);
+      root.current.position.set(
+        position[0],
+        returnedToSeat(visit) ? 0.1 * couchPose(couchAmount.current).blend : position[1],
+        position[2],
+      );
+      if (visit.phase === "drinking")
+        root.current.rotation.y = gettingCoffee ? coffeeGuestRotation : coolerDrinkingRotation;
+      else if (Math.hypot(ahead[0] - position[0], ahead[2] - position[2]) > 0.001) {
+        const backingIn =
+          visit.phase === "returning" &&
+          seat &&
+          Math.abs(position[0] - seat[0]) < 0.01 &&
+          Math.abs(position[2] - seat[2]) < 1.2;
+        root.current.rotation.y = turnToward(
+          root.current.rotation.y,
+          backingIn ? 0 : Math.atan2(ahead[0] - position[0], ahead[2] - position[2]),
+          delta,
+        );
+      }
       initialized.current = true;
       return;
     }
@@ -236,21 +331,39 @@ export function AgentPresence({
       initialized.current = true;
       return;
     }
-    const step = deskTravelStep(
-      root.current.position.x,
-      root.current.position.z,
-      targetX,
-      targetZ,
-      Math.min(delta, 0.1),
-      reducedMotion,
-    );
+    const approachZ = isRelaxing && !approachedCouch.current ? targetZ + 1.2 : targetZ;
+    if (
+      isRelaxing &&
+      (reducedMotion ||
+        Math.hypot(targetX - root.current.position.x, approachZ - root.current.position.z) < 0.08)
+    )
+      approachedCouch.current = true;
+    const backingIn = isRelaxing && approachedCouch.current;
+    const destinationZ = isRelaxing && !approachedCouch.current ? targetZ + 1.2 : targetZ;
+    const step = backingIn
+      ? routeTravelStep(
+          root.current.position.x,
+          root.current.position.z,
+          [
+            [root.current.position.x, root.current.position.z],
+            [targetX, destinationZ],
+          ],
+          1,
+          Math.min(delta, 0.1),
+          reducedMotion,
+        )
+      : walkTo(targetX, destinationZ, delta);
+    if (backingIn) travelRoute.current = null;
     if (step.walking !== travelling) setTravelling(step.walking);
-    root.current.position.set(step.x, step.walking ? 0 : targetY, step.z);
-    root.current.rotation.y = THREE.MathUtils.damp(
+    root.current.position.set(
+      step.x,
+      step.walking ? 0 : targetY * (seat ? couchPose(couchAmount.current).blend : 1),
+      step.z,
+    );
+    root.current.rotation.y = turnToward(
       root.current.rotation.y,
-      step.walking ? step.rotation : targetRotation,
-      reducedMotion ? 100 : 3.2,
-      delta,
+      step.walking && !backingIn ? step.rotation : targetRotation,
+      reducedMotion ? 100 : delta,
     );
   });
 
@@ -258,6 +371,7 @@ export function AgentPresence({
   return (
     <group
       ref={root}
+      name={`agent-${agent.id}`}
       onClick={(event) => {
         event.stopPropagation();
         onSelect();
@@ -269,21 +383,27 @@ export function AgentPresence({
         reducedMotion={reducedMotion}
         relaxing={isRelaxing}
         loungeVariant={loungeVariant}
+        couchAmount={couchAmount}
+        couchTransitioning={couchTransitioning}
         walking={Boolean(
           (leaving &&
             !reducedMotion &&
             (homeTime < homeTimeline.desk || homeTime >= homeTimeline.coffee)) ||
           (!leaving && travelling) ||
           (!leaving && bossing && running) ||
-          (visit && visit.phase !== "drinking") ||
-          (game && game.phase !== "playing"),
+          (visit && visit.phase !== "drinking" && !returnedToSeat(visit)) ||
+          (game && game.phase !== "playing" && !returnedToSeat(game)),
         )}
         bossing={bossing}
         homeDesk={leaving && homeTime >= homeTimeline.desk && homeTime < homeTimeline.coffee}
-        carryingCoffee={leaving && homeTime >= homeTimeline.shutdown}
+        carryingCoffee={
+          (leaving && homeTime >= homeTimeline.shutdown) ||
+          (gettingCoffee && visit?.phase === "returning")
+        }
         playing={playing}
         partying={partying && !travelling}
-        drinkingWater={visit?.phase === "drinking"}
+        drinkingWater={!gettingCoffee && visit?.phase === "drinking"}
+        brewingCoffee={gettingCoffee && visit?.phase === "drinking"}
       />
       {leaving && labels && (
         <OfficeLabel position={[0, 1, 0]} offset={1.1}>
@@ -357,10 +477,16 @@ export function AgentPresence({
             {agent.displayName}
             {"\n"}
             {visit.phase === "drinking"
-              ? "Having a drink"
+              ? gettingCoffee
+                ? "Making coffee"
+                : "Having a drink"
               : visit.phase === "outbound"
-                ? "Water break"
-                : "Back to the couch"}
+                ? gettingCoffee
+                  ? "Coffee break"
+                  : "Water break"
+                : gettingCoffee
+                  ? "Coffee to the couch"
+                  : "Back to the couch"}
           </Text>
         </OfficeLabel>
       )}

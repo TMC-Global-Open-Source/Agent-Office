@@ -1,6 +1,6 @@
 import type { Agent } from "./model.js";
 
-export const homeTimeline = { desk: 5, shutdown: 7, coffee: 8, exit: 18, gone: 20 };
+export const homeTimeline = { desk: 2.5, shutdown: 4.5, coffee: 5.5, exit: 10.5, gone: 12.5 };
 
 export function homeDeparture(agent: Pick<Agent, "metadata">) {
   const value = agent.metadata.homeDeparture;

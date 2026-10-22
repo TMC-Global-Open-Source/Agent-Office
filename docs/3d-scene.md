@@ -4,6 +4,11 @@
 
 The default camera zoom is 50 (reset restores this scale), with manual zoom from 18 to 100. Desk name/status labels use camera-facing billboards and larger text for readability.
 
+On desktop, the canvas fills the remaining viewport height after the header, toolbar,
+caption and footer, without a fixed maximum height. Resizing the window expands the
+visible office at the existing zoom rather than scaling the agents. Short windows keep
+a 240px minimum canvas and can scroll; mobile retains its stacked, scrollable layout.
+
 Use local primitive geometries and shared status colors. Keep an animation state explicit, and honor reduced-motion preference by disabling entrance motion and camera movement. Add furniture as a small component in `apps/web/src/office`, then compose it in `Workstation` or `OfficeScene`. Avoid external model dependencies and photorealistic textures.
 
 Desk row/column assignments come from SQLite and are deterministic. Regular desk positions
@@ -27,6 +32,14 @@ seated legs and deterministic reading, coffee-sipping, or reclining/stretching p
 `lounge-animation.ts` generates staggered poses without per-frame React updates. Reduced-motion
 mode retains a static relaxed pose, and status changes reset the couch transforms and props.
 
+Couch arrivals approach from the front, turn and back into the seat, then ease into
+the cushion over one second. Departures pause for a 0.8-second forward lean and push-up
+before walking. A continuous hip/knee rig blends between bent and straight legs instead
+of swapping meshes; reading/coffee props are put away while transitioning.
+`couch-motion.ts` shares the timing with water and game routes so agents do not slide
+away during the rise. Interrupted transitions reverse from the current pose; reduced
+motion switches directly to the final pose.
+
 `WaterCooler` sits beside the lounge. `water-cooler.ts` schedules one idle visitor at
 a time after an initial 20–45-second wait, followed by 30–70 seconds between visits.
 Agents walk along the front/side lounge aisles at 1.5 world units per second, drink for
@@ -35,6 +48,23 @@ a different reading, sipping, or reclining task. New work immediately cancels th
 The scheduler uses the full idle roster and bounded frame time, so filters do not
 cancel breaks and hidden tabs do not fast-forward them. Reduced-motion mode suppresses
 visits and retains static couch poses. Breaks are visual only and do not modify provider status.
+
+`CoffeeMaker` sits in a small kitchenette to the right of the first lounge's right-hand
+couch, with L-shaped paneled base cabinets, a light counter and a sink/faucet.
+The short return extends inward at the top end; the coffee maker sits on this return,
+facing the front aisle for visibility from the default camera. Agents approach its
+front to brew. There is no backsplash. Both legs of the counter are included in furniture avoidance.
+It sits at the outer right edge opposite the game cabinets, rotated 90 degrees to
+face inward toward them; agents approach from the central right-side aisle and face
+the machine while brewing.
+The former standalone brown decorative block is removed; the whole kitchenette footprint
+is included in furniture avoidance, with a clear right-side aisle for coffee runs. Idle/completed
+lounge agents occasionally visit it, one at a time: stand, walk along the front aisle,
+brew for six seconds, and carry a mug back to sip on the couch. The shared station
+scheduler in `water-cooler.ts` waits 25–50 seconds initially and 45–90 seconds between
+coffee runs. Coffee, water and game visitors are mutually exclusive; work, departures,
+parties and reduced motion cancel visits. Brewing shows a coffee stream and steam
+(static under reduced motion), and the station is included in departure-route obstacles.
 
 `GameCorner` places an arcade cabinet and a pinball table in the back-left corner beside the lounge; the water cooler stands beside the left sofa, facing the room.
 `game-room.ts` sends lounge agents (idle or completed) to play, one player per machine,
@@ -62,12 +92,18 @@ showing a static working pose instead.
 Travel between lounge seats and desks uses a steady walking pace with directional
 facing and swinging arms and legs. Agents stay standing during travel and switch to
 their seated activity only on arrival; reduced motion places them directly at the destination.
+Desk travel uses the furniture visibility graph for normal work, boss-mode sprints,
+and home departures. Agents enter and exit the chair from a side access point, never
+from across the tabletop. Routes replan when destinations or furniture change and
+stop at each corner to avoid clipping through obstacles; only the occupied chair's
+final lateral seating segment is allowed through its bounds.
 
 **Send home** in the agent profile starts a server-persisted departure. Shared
 `homeTimeline` milestones (seconds from the action) keep clients and cleanup aligned:
-walk to the desk by 5, shut off the monitor and collect the cup at 7, leave at 8,
-reach the nearest side boundary of the office by 18 and disappear immediately there,
-then puff the furniture away and remove the desk at 20.
+walk to the desk by 2.5, shut off the monitor at 4.5, leave with the cup at 5.5,
+reach the nearest side boundary of the office by 10.5 and disappear immediately there,
+then puff the furniture away and remove the desk at 12.5. Travel is twice the original
+send-home pace; shutdown, pickup and smoke durations are unchanged.
 `home-route.ts` finds clear routes through expanded furniture corners, accounting for
 avatar width and all desks, chairs, sofas, coffee tables, game cabinets and the cooler.
 Agents first step forward out of their own seat, then use the aisles rather than

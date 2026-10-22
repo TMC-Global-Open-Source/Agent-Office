@@ -160,7 +160,7 @@ wave, floss, confetti); this needs the GitHub CLI signed in (`gh auth login`). S
 To clear unwanted agents from the floor, click an agent and choose **Send home**.
 It walks to its desk, switches off the monitor, picks up its coffee and follows
 clear aisles around furniture to the office boundary, where it disappears;
-the desk and chair disappear in a puff of smoke. The departure takes about 20 seconds.
+the desk and chair disappear in a puff of smoke. The departure takes about 12.5 seconds.
 This is a persistent office dismissal, not a command to stop the actual Copilot session.
 The agent stays hidden across refreshes and server restarts until it reports fresh work,
 then returns with its saved color and history. Sending home is available on the host PC;
