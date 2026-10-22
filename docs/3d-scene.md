@@ -100,9 +100,10 @@ final lateral seating segment is allowed through its bounds.
 
 **Send home** in the agent profile starts a server-persisted departure. Shared
 `homeTimeline` milestones (seconds from the action) keep clients and cleanup aligned:
-walk to the desk by 5, shut off the monitor and collect the cup at 7, leave at 8,
-reach the nearest side boundary of the office by 18 and disappear immediately there,
-then puff the furniture away and remove the desk at 20.
+walk to the desk by 2.5, shut off the monitor at 4.5, leave with the cup at 5.5,
+reach the nearest side boundary of the office by 10.5 and disappear immediately there,
+then puff the furniture away and remove the desk at 12.5. Travel is twice the original
+send-home pace; shutdown, pickup and smoke durations are unchanged.
 `home-route.ts` finds clear routes through expanded furniture corners, accounting for
 avatar width and all desks, chairs, sofas, coffee tables, game cabinets and the cooler.
 Agents first step forward out of their own seat, then use the aisles rather than
