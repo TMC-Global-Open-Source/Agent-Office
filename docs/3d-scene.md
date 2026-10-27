@@ -27,6 +27,14 @@ joining color. The validated hex color is persisted in the avatar profile and br
 to connected dashboards, updating both the figure and roster badge.
 
 Idle agents move into stable seats in `LivingRoom`; other statuses return to their desks.
+The existing lounge provides eight seats. Additional couch bays are added only when
+the active office headcount exceeds eight (one bay per eight present agents).
+Offline agents and working agents explicitly reporting `officeActivity: "away"` do
+not count; idle, completed, joining and queued agents still do. Filters never change
+lounge capacity. When headcount shrinks, occupants of removed bays move into free
+seats in the remaining lounge.
+An empty roster after a successful load shows "The office is empty", not a pending
+first-sync message. Desks appear when agents join or return.
 `AgentPresence` positions the avatar independently of the furniture. Couch avatars have bent
 seated legs and deterministic reading, coffee-sipping, or reclining/stretching personalities.
 `lounge-animation.ts` generates staggered poses without per-frame React updates. Reduced-motion
@@ -123,13 +131,14 @@ sync completes departures that elapsed while the server was stopped.
 Local Copilot History and usage attribution include dismissed agents; sending home
 never deletes usage records or moves their known usage into the unattributed bucket.
 
-Offline agents are out of the office: their avatars disappear, their desk monitors
-dim, and an Away marker remains. Roster/list entries show last-seen time. Desks stay
-reserved for the configured **Offline desk retention (hours)**, without extending
-the deadline on every refresh. Resuming before expiry restores the same desk.
-After expiry, the agent is archived and its desk freed; profile color, metadata and
-activity history remain in SQLite. A later return reactivates the profile and allocates
-an available desk. Parent links are retained, so returning subagents rejoin their team.
+Away agents are out of the office: on a successful provider refresh, their desks are
+cleared before new desks are allocated, and remaining desks are compacted.
+They are excluded from the office roster, headcount and couch capacity immediately.
+Profile color, metadata, usage and activity history remain in SQLite. A later return
+allocates an available desk with the saved profile. Parent links are retained, so
+returning subagents rejoin their team. Joining and queued agents retain their desks.
+The legacy `retainOfflineHours` configuration field remains accepted for compatibility
+but no longer delays clearing away desks; its settings control has been removed.
 
 Working avatars sit centered at the keyboard with bent elbows and forearms reaching the
 keys. `TypingArms` positions the arm segments between shoulders, elbows, and wrists;

@@ -1,6 +1,7 @@
 import type { DeskData } from "./Workstation.js";
 import { coffeePosition, coolerPosition } from "./water-cooler.js";
 import { machinePositions } from "./game-room.js";
+import { loungeBayCount } from "./lounge-eligibility.js";
 
 export type FloorPoint = [number, number];
 export interface FurnitureBounds {
@@ -30,7 +31,7 @@ export function homeObstacles(desks: DeskData[], seats: number): FurnitureBounds
     desktop.maxZ = z + 0.6;
     return [desktop, { ...bounds(x, z + 0.82, 0.8, 0.8), seat: [x, z + 0.65] as FloorPoint }];
   });
-  for (let bay = 0; bay < Math.max(1, Math.ceil(seats / 8)); bay++) {
+  for (let bay = 0; bay < loungeBayCount(seats); bay++) {
     const z = -5.5 - bay * 5.2;
     obstacles.push(
       bounds(-2.05, z - 0.95, 3.65, 1.12),

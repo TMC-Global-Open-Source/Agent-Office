@@ -9,6 +9,7 @@ export interface CameraState {
 }
 import {
   defaultConfig,
+  isAwayFromOffice,
   type Agent,
   type AgentState,
   type AppConfig,
@@ -117,13 +118,20 @@ export const useOfficeStore = create<OfficeStore>()(
       performanceMode: false,
       autoFocus: true,
       setSnapshot: (agents, stale) =>
-        set({ agents, stale, lastSync: new Date().toISOString(), error: null }),
+        set({
+          agents: agents.filter((agent) => !isAwayFromOffice(agent)),
+          stale,
+          lastSync: new Date().toISOString(),
+          error: null,
+        }),
       setDesks: (desks) => set({ desks }),
       upsertAgent: (agent) =>
         set((state) => ({
-          agents: state.agents.some((item) => item.id === agent.id)
-            ? state.agents.map((item) => (item.id === agent.id ? agent : item))
-            : [...state.agents, agent],
+          agents: isAwayFromOffice(agent)
+            ? state.agents.filter((item) => item.id !== agent.id)
+            : state.agents.some((item) => item.id === agent.id)
+              ? state.agents.map((item) => (item.id === agent.id ? agent : item))
+              : [...state.agents, agent],
         })),
       setHealth: (health) => set({ health, stale: health.stale }),
       setConnected: (connected) => set({ connected }),
@@ -150,7 +158,7 @@ export const useOfficeStore = create<OfficeStore>()(
           const config = (await configResponse.json()) as { data: AppConfig };
           set({
             officeTitle: config.data.officeTitle,
-            agents: agents.data,
+            agents: agents.data.filter((agent) => !isAwayFromOffice(agent)),
             stale: Boolean(agents.stale),
             lastSync: health.data.lastSuccessAt,
             desks: desks.data,

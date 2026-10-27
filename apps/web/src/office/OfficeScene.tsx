@@ -33,11 +33,11 @@ import { loungePersonality } from "./lounge-animation.js";
 import { officeViews, type OfficeView } from "./camera-views.js";
 import { useOfficeStore } from "../store.js";
 import { agentDisplayName } from "../agent-name.js";
-import { belongsInLounge } from "./lounge-eligibility.js";
+import { assignLoungeSeats, belongsInLounge, loungeBayCount } from "./lounge-eligibility.js";
 import { partyElapsed, partyStartedAt } from "./party-animation.js";
 import { useSecretParty } from "./secret-party.js";
 import { bossActive, bossDurationMs, bossEligible } from "./boss-mode.js";
-import { homeDeparture, homeElapsed, homeTimeline } from "@agent-office/shared";
+import { homeDeparture, homeElapsed, homeTimeline, isAwayFromOffice } from "@agent-office/shared";
 import { homeObstacles } from "./home-route.js";
 
 const defaultZoom = 50;
@@ -142,27 +142,20 @@ function Scene({
   const selectedDesk = selectedId ? byDesk.get(selectedId) : undefined;
   const loungeIndexByAgent = useMemo(() => {
     const idleAgents = allAgents.filter((agent) => belongsInLounge(agent, loungeNow));
-    const idleIds = new Set(idleAgents.map((agent) => agent.id));
-    const assignments = new Map([...loungeAssignments.current].filter(([id]) => idleIds.has(id)));
-    const occupiedSeats = new Set(assignments.values());
-    const newIdleAgents = idleAgents
-      .filter((agent) => !assignments.has(agent.id))
-      .sort((a, b) => {
-        const aDesk = byDesk.get(a.id);
-        const bDesk = byDesk.get(b.id);
-        return (
-          (aDesk?.row ?? 0) - (bDesk?.row ?? 0) ||
-          (aDesk?.column ?? 0) - (bDesk?.column ?? 0) ||
-          a.id.localeCompare(b.id)
-        );
-      });
-    const capacity = Math.max(8, Math.ceil(allAgents.length / 8) * 8);
-    for (const agent of newIdleAgents) {
-      let seat = 0;
-      while (occupiedSeats.has(seat) && seat < capacity) seat++;
-      assignments.set(agent.id, seat);
-      occupiedSeats.add(seat);
-    }
+    idleAgents.sort((a, b) => {
+      const aDesk = byDesk.get(a.id);
+      const bDesk = byDesk.get(b.id);
+      return (
+        (aDesk?.row ?? 0) - (bDesk?.row ?? 0) ||
+        (aDesk?.column ?? 0) - (bDesk?.column ?? 0) ||
+        a.id.localeCompare(b.id)
+      );
+    });
+    const assignments = assignLoungeSeats(
+      loungeAssignments.current,
+      idleAgents.map((agent) => agent.id),
+      allAgents.length,
+    );
     loungeAssignments.current = assignments;
     return assignments;
   }, [allAgents, byDesk, loungeNow]);
@@ -289,7 +282,7 @@ function Scene({
   const floorSize = Math.max(
     18,
     Math.ceil(Math.sqrt(Math.max(1, agents.length)) / 5) * 18,
-    14 + Math.ceil(agents.length / 8) * 5.2,
+    14 + loungeBayCount(allAgents.length) * 5.2,
     ...layout.desks.map(
       (desk) => Math.max(Math.abs((desk.column - 2) * 3.15), Math.abs(desk.row * 3.15)) * 2 + 6,
     ),
@@ -443,15 +436,17 @@ export function OfficeScene(props: {
     },
   );
   const displayAgents = (agents: Agent[]) =>
-    agents.map((agent) => ({
-      ...agent,
-      displayName: agentDisplayName(agent, showSource),
-      metadata: {
-        ...agent.metadata,
-        ...(officeParty?.guests.has(agent.id) ? { officeParty: officeParty.at } : {}),
-        ...(boss?.guests.has(agent.id) ? { bossAt: boss.at } : {}),
-      },
-    }));
+    agents
+      .filter((agent) => !isAwayFromOffice(agent))
+      .map((agent) => ({
+        ...agent,
+        displayName: agentDisplayName(agent, showSource),
+        metadata: {
+          ...agent.metadata,
+          ...(officeParty?.guests.has(agent.id) ? { officeParty: officeParty.at } : {}),
+          ...(boss?.guests.has(agent.id) ? { bossAt: boss.at } : {}),
+        },
+      }));
   return (
     <Canvas
       orthographic

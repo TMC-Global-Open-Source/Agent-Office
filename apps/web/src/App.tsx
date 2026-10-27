@@ -69,6 +69,20 @@ const demoLabels: Record<string, string> = {
   "agent-offline": "Agent goes offline",
 };
 
+export function EmptyOffice({ loaded }: { loaded: boolean }) {
+  return (
+    <div className="scene-empty" role="status">
+      <Activity size={20} />
+      <strong>{loaded ? "The office is empty" : "Preparing your office"}</strong>
+      <span>
+        {loaded
+          ? "No agents are currently in the office. Desks will appear when agents join or return."
+          : "Loading the current office state."}
+      </span>
+    </div>
+  );
+}
+
 export function StatusSummary({ agents }: { agents: Agent[] }) {
   const counts = statusCounts.map(
     (status) => [status, agents.filter((agent) => agent.status === status).length] as const,
@@ -843,18 +857,6 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                   }
                 />
               </label>
-              <label>
-                Offline desk retention (hours)
-                <input
-                  type="number"
-                  min="1"
-                  max="8760"
-                  value={config.retainOfflineHours}
-                  onChange={(event) =>
-                    setConfig({ ...config, retainOfflineHours: Number(event.target.value) })
-                  }
-                />
-              </label>
               <label className="setting-list">
                 Needs-attention markers (one per line)
                 <textarea
@@ -967,6 +969,7 @@ export function App() {
       window.setTimeout(() => setDemoMessage(""), 3000);
     });
     socket.on("agent:updated", (agent: Agent) => state.upsertAgent(agent));
+    socket.on("agent:removed", () => void state.refresh());
     socket.on("provider:health", state.setHealth);
     socket.on("refresh:completed", () => void state.refresh());
     socket.on("refresh:failed", () => {
@@ -1215,11 +1218,7 @@ export function App() {
               </button>
             )}
             {state.agents.length === 0 && !state.error && (
-              <div className="scene-empty">
-                <Activity size={20} />
-                <strong>Preparing your office</strong>
-                <span>Agent workstations will appear here when the first sync completes.</span>
-              </div>
+              <EmptyOffice loaded={state.health !== null} />
             )}
             {state.performanceMode && (
               <div className="performance-panel" aria-label="Performance panel">

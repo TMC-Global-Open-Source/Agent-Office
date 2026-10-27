@@ -16,4 +16,4 @@ or a session ending cancels the pending transition; genuine terminal statuses ar
 
 The adapter does not currently observe workflow/check, review, or direct Copilot session state. Unsupported state remains unknown rather than fabricated. Configure marker lists in Office settings; each non-empty line is treated as a case-insensitive substring in the pull request title or body.
 
-Mock status is generated from fixed sample agents and controllable demo transitions. An agent missing from one successful provider refresh goes offline and keeps its desk for the configured retention period. A failed refresh never overwrites the stored snapshot.
+Mock status is generated from fixed sample agents and controllable demo transitions. An agent missing from one successful provider refresh goes offline and its desk is cleared immediately. Offline agents and working agents explicitly reporting `officeActivity: "away"` are excluded from office headcount; their profiles and history remain stored. Joining and queued agents keep their desks. A failed provider fetch never clears desks or overwrites the stored snapshot.

@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { loungeBayCount } from "./lounge-eligibility.js";
 
 const sofaColors = ["#668b82", "#8296a0"];
 const seatOffsets = [-1.29, -0.43, 0.43, 1.29];
@@ -11,11 +12,11 @@ export function livingRoomSeat(index: number): [number, number, number] {
 }
 
 export const LivingRoom = memo(function LivingRoom({ seatCount }: { seatCount: number }) {
-  const bayCount = Math.max(1, Math.ceil(seatCount / 8));
+  const bayCount = loungeBayCount(seatCount);
   return (
     <>
       {Array.from({ length: bayCount }, (_, bay) => (
-        <group key={bay} position={[0, 0, -5.5 - bay * 5.2]}>
+        <group key={bay} name={`lounge-bay-${bay}`} position={[0, 0, -5.5 - bay * 5.2]}>
           <mesh position={[0, 0.012, 0]} receiveShadow>
             <boxGeometry args={[8.2, 0.025, 4.8]} />
             <meshStandardMaterial color="#d2c6ae" roughness={0.98} />

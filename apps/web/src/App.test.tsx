@@ -5,6 +5,7 @@ import {
   AgentDetails,
   AgentList,
   ConnectionStatus,
+  EmptyOffice,
   StatusSummary,
   TokenUsageSummary,
   UsageByFolder,
@@ -38,18 +39,36 @@ const sample: Agent = {
 };
 
 describe("dashboard components", () => {
+  it("distinguishes an empty office from loading the initial snapshot", () => {
+    const { rerender } = render(<EmptyOffice loaded={false} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Preparing your office");
+    rerender(<EmptyOffice loaded />);
+    expect(screen.getByRole("status")).toHaveTextContent("The office is empty");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Desks will appear when agents join or return.",
+    );
+    expect(screen.queryByText("Preparing your office")).not.toBeInTheDocument();
+  });
+  it("excludes away agents from snapshots and live headcount, then restores returning agents", () => {
+    const offline = { ...sample, id: "offline", status: "offline" as const };
+    const away = { ...sample, id: "away", metadata: { officeActivity: "away" } };
+    useOfficeStore.getState().setSnapshot([sample, offline, away], false);
+    expect(useOfficeStore.getState().agents).toEqual([sample]);
+    useOfficeStore.getState().upsertAgent({ ...sample, status: "offline" });
+    expect(useOfficeStore.getState().agents).toEqual([]);
+    useOfficeStore.getState().upsertAgent(sample);
+    expect(useOfficeStore.getState().agents).toEqual([sample]);
+  });
   it("sends an agent home from its profile and reports request failures", async () => {
     const onClose = vi.fn();
-    const fetchMock = vi
-      .fn()
-      .mockImplementation(async (url: string) =>
-        url.endsWith("/home")
-          ? {
-              ok: false,
-              json: async () => ({ error: { message: "Agent could not be sent home." } }),
-            }
-          : { ok: true, json: async () => ({ data: [] }) },
-      );
+    const fetchMock = vi.fn().mockImplementation(async (url: string) =>
+      url.endsWith("/home")
+        ? {
+            ok: false,
+            json: async () => ({ error: { message: "Agent could not be sent home." } }),
+          }
+        : { ok: true, json: async () => ({ data: [] }) },
+    );
     vi.stubGlobal("fetch", fetchMock);
     useOfficeStore.setState({ agents: [sample] });
     render(<AgentDetails agent={sample} onClose={onClose} />);

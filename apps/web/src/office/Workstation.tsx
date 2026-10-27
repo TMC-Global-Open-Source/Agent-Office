@@ -77,6 +77,7 @@ export const Workstation = memo(function Workstation({
   return (
     <group
       ref={root}
+      name={`workstation-${agent.id}`}
       position={[x, agent.status === "spawning" && !reducedMotion ? 0.55 : 0, z]}
       onClick={(event) => {
         event.stopPropagation();
