@@ -103,45 +103,81 @@ describe("Agent Office API", () => {
     }
   });
 
-  it("marks a missing agent offline but retains its assigned desk", async () => {
-    await syncAgents();
+  it("clears an away agent's desk immediately and restores it when work resumes", async () => {
+    const initial = await syncAgents();
     const offline = await request(app).post("/api/v1/demo/events/agent-offline").expect(200);
     expect(offline.body.data.status).toBe("offline");
-    const desk = await prisma.desk.findUnique({ where: { agentId: "demo-theo" } });
-    expect(desk?.active).toBe(false);
-    expect(desk?.reservedUntil).not.toBeNull();
-    await syncAgents();
-    expect(
-      (await prisma.desk.findUnique({ where: { agentId: "demo-theo" } }))?.reservedUntil,
-    ).toEqual(desk?.reservedUntil);
+    expect(await prisma.desk.findUnique({ where: { agentId: "demo-theo" } })).toBeNull();
+    const remaining = await syncAgents();
+    expect(remaining.some((agent) => agent.id === "demo-theo")).toBe(false);
+    expect((await request(app).get("/api/v1/agents").expect(200)).body.data).toHaveLength(
+      initial.length - 1,
+    );
+    expect((await request(app).get("/api/v1/desks").expect(200)).body.data).toHaveLength(
+      initial.length - 1,
+    );
+    expect(await prisma.desk.findUnique({ where: { agentId: "demo-theo" } })).toBeNull();
     await request(app).post("/api/v1/demo/events/queued-to-working").expect(200);
     const resumed = await prisma.desk.findUnique({ where: { agentId: "demo-theo" } });
-    expect([resumed?.row, resumed?.column]).toEqual([desk?.row, desk?.column]);
     expect(resumed?.active).toBe(true);
     expect(resumed?.reservedUntil).toBeNull();
+    expect(await syncAgents()).toHaveLength(initial.length);
   });
 
-  it("archives expired offline agents, frees desks, and restores their saved color on return", async () => {
+  it("preserves desks and headcount when the provider refresh fails", async () => {
+    const agents = await syncAgents();
+    const desks = await prisma.desk.findMany();
+    const fetch = vi
+      .spyOn(provider, "fetchAgents")
+      .mockRejectedValue(new Error("Provider unavailable"));
+    try {
+      await expect(syncAgents()).rejects.toThrow("Provider unavailable");
+      expect(await prisma.desk.findMany()).toEqual(desks);
+      expect((await request(app).get("/api/v1/agents").expect(200)).body.data).toHaveLength(
+        agents.length,
+      );
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it("reactivates a legacy reserved desk if its agent returns before cleanup", async () => {
+    const [agent] = await syncAgents();
+    const before = await prisma.desk.update({
+      where: { agentId: agent!.id },
+      data: { active: false, reservedUntil: new Date(Date.now() + 3_600_000) },
+    });
+    await prisma.agent.update({ where: { id: agent!.id }, data: { status: "offline" } });
     await syncAgents();
-    await request(app).post("/api/v1/demo/events/agent-offline").expect(200);
+    const after = await prisma.desk.findUniqueOrThrow({ where: { agentId: agent!.id } });
+    expect([after.id, after.row, after.column]).toEqual([before.id, before.row, before.column]);
+    expect(after.active).toBe(true);
+    expect(after.reservedUntil).toBeNull();
+  });
+
+  it("preserves away profiles, usage and history and restores their saved color on return", async () => {
+    await syncAgents();
     await prisma.avatarProfile.update({
       where: { agentId: "demo-theo" },
       data: { color: "#123456" },
     });
-    await prisma.desk.update({
-      where: { agentId: "demo-theo" },
-      data: { reservedUntil: new Date(Date.now() - 1000) },
+    await prisma.agent.update({
+      where: { id: "demo-theo" },
+      data: { tokensUsed: 12345 },
     });
+    await request(app).post("/api/v1/demo/events/agent-offline").expect(200);
     const remaining = await syncAgents();
     expect(remaining.some((agent) => agent.id === "demo-theo")).toBe(false);
     expect(await prisma.desk.findUnique({ where: { agentId: "demo-theo" } })).toBeNull();
     expect(
       (await prisma.avatarProfile.findUnique({ where: { agentId: "demo-theo" } }))?.color,
     ).toBe("#123456");
-    expect(
-      JSON.parse((await prisma.agent.findUniqueOrThrow({ where: { id: "demo-theo" } })).metadata)
-        .archivedAt,
-    ).toBeDefined();
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: "demo-theo" } })).tokensUsed).toBe(
+      12345,
+    );
+    expect(await prisma.agentActivity.count({ where: { agentId: "demo-theo" } })).toBeGreaterThan(
+      0,
+    );
     expect((await syncAgents()).some((agent) => agent.id === "demo-theo")).toBe(false);
     const returned = await request(app).post("/api/v1/demo/events/queued-to-working").expect(200);
     expect(returned.body.data.avatarColor).toBe("#123456");
@@ -152,21 +188,81 @@ describe("Agent Office API", () => {
   it("consolidates remaining desks into the top-left slots after a desk is removed", async () => {
     await syncAgents();
     const before = await prisma.desk.findMany({ orderBy: [{ row: "asc" }, { column: "asc" }] });
-    const theo = before.find((desk) => desk.agentId === "demo-theo")!;
-    expect(before.at(-1)?.id).not.toBe(theo.id);
-    await request(app).post("/api/v1/demo/events/agent-offline").expect(200);
-    await prisma.desk.update({
-      where: { agentId: "demo-theo" },
-      data: { reservedUntil: new Date(Date.now() - 1000) },
-    });
-    await syncAgents();
+    const removed = before[1]!;
+    const snapshot = await provider.fetchAgents();
+    const fetch = vi
+      .spyOn(provider, "fetchAgents")
+      .mockResolvedValue(
+        snapshot.map((agent) =>
+          agent.id === removed.agentId ? { ...agent, status: "offline" } : agent,
+        ),
+      );
+    try {
+      await syncAgents();
+    } finally {
+      fetch.mockRestore();
+    }
     const after = await prisma.desk.findMany({ orderBy: [{ row: "asc" }, { column: "asc" }] });
     expect(after.map((desk) => desk.agentId)).toEqual(
-      before.filter((desk) => desk.id !== theo.id).map((desk) => desk.agentId),
+      before.filter((desk) => desk.id !== removed.id).map((desk) => desk.agentId),
     );
     after.forEach((desk, index) => {
       expect([desk.row, desk.column]).toEqual([Math.floor(index / 5), index % 5]);
     });
+  });
+
+  it("clears missing agents and explicit away activity before allocating new desks", async () => {
+    const initial = await syncAgents();
+    const snapshot = await provider.fetchAgents();
+    const missing = snapshot[0]!;
+    const away = snapshot[1]!;
+    const newcomer = { ...snapshot[2]!, id: "new-active-agent", status: "working" as const };
+    const fetch = vi.spyOn(provider, "fetchAgents").mockResolvedValue([
+      newcomer,
+      ...snapshot
+        .filter((agent) => agent.id !== missing.id)
+        .map((agent) =>
+          agent.id === away.id
+            ? {
+                ...agent,
+                status: "working" as const,
+                metadata: { ...agent.metadata, officeActivity: "away" },
+              }
+            : agent,
+        ),
+    ]);
+    try {
+      const active = await syncAgents();
+      expect(active).toHaveLength(initial.length - 1);
+      expect(active.some((agent) => [missing.id, away.id].includes(agent.id))).toBe(false);
+      const desks = await prisma.desk.findMany({ orderBy: [{ row: "asc" }, { column: "asc" }] });
+      expect(desks).toHaveLength(active.length);
+      desks.forEach((desk, index) => {
+        expect([desk.row, desk.column]).toEqual([Math.floor(index / 5), index % 5]);
+      });
+      expect((await prisma.agent.findUniqueOrThrow({ where: { id: missing.id } })).status).toBe(
+        "offline",
+      );
+      expect(await syncAgents()).toHaveLength(active.length);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it("never allocates a desk to a newly discovered away agent", async () => {
+    const [sample] = await provider.fetchAgents();
+    const fetch = vi
+      .spyOn(provider, "fetchAgents")
+      .mockResolvedValue([{ ...sample!, id: "new-away-agent", status: "offline" }]);
+    try {
+      expect(await syncAgents()).toEqual([]);
+      expect(await prisma.desk.count()).toBe(0);
+      expect(
+        (await prisma.agent.findUniqueOrThrow({ where: { id: "new-away-agent" } })).status,
+      ).toBe("offline");
+    } finally {
+      fetch.mockRestore();
+    }
   });
 
   it("saves joining colors and preserves them instead of using provider colors on refresh", async () => {

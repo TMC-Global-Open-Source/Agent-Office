@@ -19,6 +19,7 @@ import {
   homeDeparture,
   homeTimeline,
   resumesFromHome,
+  isAwayFromOffice,
 } from "@agent-office/shared";
 import { env, projectRoot } from "./env.js";
 import { z, ZodError } from "zod";
@@ -182,6 +183,7 @@ async function getStoredAgents(includeArchived = false): Promise<Agent[]> {
   });
   return records.map(publicAgent).filter((agent) => {
     if (includeArchived) return true;
+    if (isAwayFromOffice(agent)) return false;
     const start = homeDeparture(agent);
     return (
       typeof agent.metadata.archivedAt !== "string" &&
@@ -213,47 +215,32 @@ export async function compactStoredDesks(): Promise<void> {
 }
 
 async function performSyncAgents(): Promise<Agent[]> {
-  const expiredDesks = await prisma.desk.findMany({
-    where: { active: false, reservedUntil: { lte: new Date() }, agent: { status: "offline" } },
-  });
-  for (const desk of expiredDesks) {
-    const agent = await prisma.agent.findUniqueOrThrow({ where: { id: desk.agentId } });
-    if (homeDeparture({ metadata: JSON.parse(agent.metadata) }) !== null) continue;
-    await prisma.$transaction([
-      prisma.agent.update({
-        where: { id: agent.id },
-        data: {
-          metadata: JSON.stringify({
-            ...JSON.parse(agent.metadata),
-            archivedAt: new Date().toISOString(),
-          }),
-        },
-      }),
-      prisma.desk.delete({ where: { id: desk.id } }),
-    ]);
-    io?.emit("agent:removed", { id: desk.agentId });
-  }
-  if (expiredDesks.length) await compactStoredDesks();
   const incoming = (await provider.fetchAgents()).map((agent) => AgentSchema.parse(agent));
   const known = await prisma.agent.findMany({
     where: provider.name === "local" ? { source: "local" } : undefined,
     include: { desk: true },
   });
   const incomingIds = new Set(incoming.map((agent) => agent.id));
-  let removedHomeDesk = false;
+  let removedDesk = false;
   for (const old of known) {
     const start = homeDeparture({ metadata: JSON.parse(old.metadata) });
     const fresh = incoming.find((agent) => agent.id === old.id);
-    if (start === null || (fresh && resumesFromHome(fresh, start))) continue;
-    if (old.desk && Date.now() >= start + homeTimeline.gone * 1000) {
+    const departing = start !== null && !(fresh && resumesFromHome(fresh, start));
+    const away = !fresh || isAwayFromOffice(fresh);
+    const clearDesk = departing
+      ? start !== null && Date.now() >= start + homeTimeline.gone * 1000
+      : away;
+    if (old.desk && clearDesk) {
       await prisma.desk.delete({ where: { id: old.desk.id } });
       old.desk = null;
-      removedHomeDesk = true;
+      removedDesk = true;
       io?.emit("agent:removed", { id: old.id });
     }
   }
-  if (removedHomeDesk) await compactStoredDesks();
+  if (removedDesk) await compactStoredDesks();
   const existingDesks = await prisma.desk.findMany();
+  // Compaction can move desks retained by other agents.
+  for (const old of known) old.desk = existingDesks.find((desk) => desk.agentId === old.id) ?? null;
   for (const agent of incoming) {
     const prior = known.find((item) => item.id === agent.id);
     const start = prior ? homeDeparture({ metadata: JSON.parse(prior.metadata) }) : null;
@@ -266,13 +253,15 @@ async function performSyncAgents(): Promise<Agent[]> {
       typeof JSON.parse(prior.metadata).archivedAt === "string"
     )
       continue;
-    const desk =
-      prior?.desk ??
-      nextDesk(
-        existingDesks.map(({ row, column }) => ({ row, column })),
-        `desk-${agent.id}`,
-      );
-    if (!prior?.desk)
+    const away = isAwayFromOffice(agent);
+    const desk = away
+      ? null
+      : (prior?.desk ??
+        nextDesk(
+          existingDesks.map(({ row, column }) => ({ row, column })),
+          `desk-${agent.id}`,
+        ));
+    if (desk && !prior?.desk)
       existingDesks.push({
         id: desk.id,
         agentId: agent.id,
@@ -282,8 +271,8 @@ async function performSyncAgents(): Promise<Agent[]> {
         reservedUntil: null,
         createdAt: new Date(),
       });
-    const created = !prior || !prior.desk;
-    const status = created && agent.source === "mock" ? "spawning" : agent.status;
+    const created = !prior || (!prior.desk && desk !== null);
+    const status = created && desk && agent.source === "mock" ? "spawning" : agent.status;
     const metadata = JSON.stringify({ ...agent.metadata, statusEvidence: agent.statusEvidence });
     await prisma.agent.upsert({
       where: { id: agent.id },
@@ -306,7 +295,7 @@ async function performSyncAgents(): Promise<Agent[]> {
         completedAt: agent.completedAt ? new Date(agent.completedAt) : null,
         metadata,
         tokensUsed: agent.tokensUsed,
-        desk: { create: { id: desk.id, row: desk.row, column: desk.column } },
+        ...(desk ? { desk: { create: { id: desk.id, row: desk.row, column: desk.column } } } : {}),
         avatar: {
           create: {
             color: randomAvatarColor(),
@@ -315,7 +304,7 @@ async function performSyncAgents(): Promise<Agent[]> {
         },
       },
       update: {
-        ...(!prior?.desk
+        ...(desk && !prior?.desk
           ? { desk: { create: { id: desk.id, row: desk.row, column: desk.column } } }
           : {}),
         displayName: agent.displayName,
@@ -331,20 +320,9 @@ async function performSyncAgents(): Promise<Agent[]> {
         tokensUsed: agent.tokensUsed ?? prior?.tokensUsed ?? null,
       },
     });
-    if (
-      agent.status === "offline" &&
-      (prior?.status !== "offline" || !prior?.desk?.reservedUntil)
-    ) {
-      await prisma.desk.updateMany({
-        where: { agentId: agent.id },
-        data: {
-          active: false,
-          reservedUntil: new Date(Date.now() + config.retainOfflineHours * 3_600_000),
-        },
-      });
-    } else if (agent.status !== "offline" && prior?.status === "offline") {
-      await prisma.desk.updateMany({
-        where: { agentId: agent.id },
+    if (desk && prior?.desk && (!prior.desk.active || prior.desk.reservedUntil !== null)) {
+      await prisma.desk.update({
+        where: { id: desk.id },
         data: { active: true, reservedUntil: null },
       });
     }
@@ -365,7 +343,9 @@ async function performSyncAgents(): Promise<Agent[]> {
         },
       });
     }
-    if (created) {
+    if (away) {
+      io?.emit("agent:removed", { id: agent.id });
+    } else if (created && desk) {
       io?.emit("agent:created", normalized);
       io?.emit("desk:created", {
         id: desk.id,
@@ -377,7 +357,6 @@ async function performSyncAgents(): Promise<Agent[]> {
       io?.emit("agent:updated", normalized);
     }
   }
-  const now = new Date();
   for (const old of known) {
     if (homeDeparture({ metadata: JSON.parse(old.metadata) }) !== null) continue;
     if (!incomingIds.has(old.id) && old.status !== "offline") {
@@ -388,23 +367,7 @@ async function performSyncAgents(): Promise<Agent[]> {
           statusReason: "Agent was absent from the latest provider refresh.",
         },
       });
-      await prisma.desk.updateMany({
-        where: { agentId: old.id },
-        data: {
-          active: false,
-          reservedUntil: new Date(now.getTime() + config.retainOfflineHours * 3_600_000),
-        },
-      });
-      io?.emit("agent:updated", {
-        ...publicAgent({
-          ...old,
-          status: "offline",
-          statusReason: "Agent was absent from the latest provider refresh.",
-          updatedAt: new Date(),
-          desk: old.desk,
-          avatar: await prisma.avatarProfile.findUnique({ where: { agentId: old.id } }),
-        }),
-      });
+      io?.emit("agent:removed", { id: old.id });
     }
   }
   lastSuccessfulRefresh = new Date().toISOString();

@@ -2,8 +2,6 @@
 
 A locally hosted monitoring dashboard for GitHub Copilot agents. The office is a procedural, low-poly 3D scene; agent status is explicitly labeled as mock, directly reported by local hooks, or inferred from observable GitHub activity.
 
-> Screenshot: add a local dashboard screenshot here.
-
 ## Quick start
 
 ### Windows one-click setup and launch
@@ -56,13 +54,33 @@ libraries while they are in use). For scripted use, setup accepts `-NoShortcut` 
 the launcher accepts `-NoBrowser`. Node.js is a prerequisite, not bundled or installed
 automatically. This is a local source-folder installation, not a standalone `.exe`.
 
+### New chats, worktrees, and separate installations
+
+A Copilot chat may create a separate Git worktree. That folder contains source code,
+but does **not** inherit the original installation's ignored `.env`, SQLite database,
+dependencies, or built application files. Changes in a worktree do not automatically
+update the original installation.
+
+If launch reports **“Settings are missing”**, the new folder has no `.env`.
+For an independent installation, run `Install-Agent-Office.cmd` in that folder.
+To reuse startup configuration, first copy your original `.env` into the new folder;
+setup preserves it. Keep this file private because it may contain credentials.
+Relative database paths refer to the new installation's database, not the original
+database. Do not point two running instances at the same database.
+
+Stop the original instance before starting another on the same port, or give each
+instance different `PORT` and `WEB_PORT` values. The launcher reuses an existing
+Agent Office on its configured port; it does not switch that server to the new folder's
+code. Setup creates a desktop shortcut pointing to its own folder; use `-NoShortcut`
+to keep an existing shortcut unchanged.
+
 ### Development
 
-Prerequisites: Node.js 20+, npm 10+.
+Prerequisites: Node.js 22.13+ and npm 10+.
 
-```sh
+```powershell
 npm install
-cp .env.example .env
+Copy-Item .env.example .env
 npm run db:migrate
 npm run db:seed
 npm run dev
@@ -105,7 +123,15 @@ The default mock workspace is sample data. To connect local Copilot CLI and VS C
 npm run connect:agents
 ```
 
-This creates a user-level Copilot hook file under `%USERPROFILE%\.copilot\hooks` on Windows (or `~/.copilot/hooks` elsewhere), generates a local bearer token in `.env`, and switches `AGENT_PROVIDER` to `local`. Restart `npm run dev`, then start or resume Copilot CLI sessions or VS Code **local** agent-harness sessions. The dashboard will show real sessions as their lifecycle events arrive; it does not import the mock roster into local mode. Use `npm run disconnect:agents` to remove the Agent Office hook file and return to mock mode.
+This creates a user-level Copilot hook file under `%USERPROFILE%\.copilot\hooks` on Windows (or `~/.copilot/hooks` elsewhere), generates a local bearer token in `.env`, and switches `AGENT_PROVIDER` to `local`. Restart the server (`Restart-Agent-Office.cmd` for the built app, or restart `npm run dev`), then start or resume Copilot CLI sessions or VS Code **local** agent-harness sessions. The dashboard will show real sessions as their lifecycle events arrive; it does not import the mock roster into local mode. Use `npm run disconnect:agents` to remove the Agent Office hook file and return to mock mode.
+
+Hooks reference the installation folder. To move monitoring to a new installation,
+run `npm run connect:agents` from the destination folder and restart its server.
+Changing only the browser URL does not redirect lifecycle hooks.
+Only one Agent Office hook registration is installed per user. The generated hook
+file targets API port **4000**; if the destination uses a different port, update
+`AGENT_OFFICE_HOOK_URL` in each event entry of that hook file to match. Rerunning
+`connect:agents` regenerates those entries with the default port.
 
 The hook bridge listens only on the loopback API and authenticates with the generated token. It sends lifecycle event, opaque session identity, runtime, and workspace folder name only—never prompts, transcripts, tool arguments, or tool results. CLI session-end hooks report completion/error; VS Code local hooks report working/idle lifecycle events. Remote/cloud VS Code sessions do not report to this local bridge.
 
@@ -118,6 +144,33 @@ It accepts 1–120 characters (excluding surrounding whitespace); the default is
 
 See `.env.example`. Startup validates configuration. `GITHUB_TOKEN` is optional in mock mode. The server binds to `127.0.0.1` by default; `HOST=0.0.0.0` (or the `-Share` launcher switch) shares a view-only office on the network.
 
+### Copy settings between instances
+
+Settings saved in **Office settings** are stored in that instance's SQLite database.
+Export them from the running source instance using PowerShell (replace `4000` with
+its API port):
+
+```powershell
+$config = (Invoke-RestMethod 'http://127.0.0.1:4000/api/v1/config').data
+$config | ConvertTo-Json -Depth 10 | Set-Content '.\office-settings.json' -Encoding utf8
+```
+
+Transfer `office-settings.json` to the destination computer, then run this **on the
+destination host**, with its server running and the URL adjusted to its API port:
+
+```powershell
+Invoke-RestMethod 'http://127.0.0.1:4000/api/v1/config' `
+  -Method Put -ContentType 'application/json' `
+  -Body (Get-Content '.\office-settings.json' -Raw)
+```
+
+The import persists dashboard settings, but does not copy agents, colors, history,
+credentials, hook registration, or startup configuration. The destination keeps its
+`AGENT_PROVIDER` from `.env`. Configure ports, database paths, tokens, and usage-source
+paths separately in `.env`; a configuration API export is not a substitute for that
+file. Camera position, view, labels, shadows, list mode, and other display preferences
+are stored separately in the browser's local storage.
+
 ## Commands
 
 | Command                                                | Purpose                                                                                               |
@@ -125,8 +178,10 @@ See `.env.example`. Startup validates configuration. `GITHUB_TOKEN` is optional 
 | `npm run dev`                                          | Run web and server together                                                                           |
 | `npm run dev:web` / `npm run dev:server`               | Run one development service                                                                           |
 | `npm run build`                                        | Build all workspaces                                                                                  |
+| `npm start`                                            | Run the built production dashboard and API                                                            |
 | `npm run lint` / `npm run typecheck`                   | Static checks                                                                                         |
 | `npm run test` / `npm run test:e2e`                    | Unit/integration and Playwright checks (install Chromium once with `npx playwright install chromium`) |
+| `npm run test:production`                              | Build and check rendering under production security headers using an isolated mock database           |
 | `npm run format`                                       | Format supported source                                                                               |
 | `npm run db:migrate` / `npm run db:seed`               | Set up and seed local SQLite                                                                          |
 | `npm run db:reset`                                     | Reset local development data                                                                          |
@@ -137,6 +192,32 @@ Docker alternative: `docker compose up --build`; the database is persisted in th
 ## Status inference
 
 Status rules and limitations are detailed in [docs/status-rules.md](docs/status-rules.md). Mock statuses are deterministic demo fixtures/events. GitHub activity is inferred and includes evidence, timestamp, confidence, and a human-readable explanation. “Direct” status is reserved for provider data that explicitly provides the status; no GitHub session API is assumed.
+
+### Idle agents, away desks, and couch capacity
+
+- **Idle agents keep their desks** while relaxing in the lounge. For local sessions,
+  the **Idle delay (seconds)** setting controls the wait after a turn stops before
+  moving from Needs attention to Idle; the default is **20 seconds**.
+- Local agents with no activity become **Offline** after **Offline threshold
+  (minutes)**, **60 minutes by default**. The threshold is based on last activity,
+  not time spent on the couch. Completed and failed local sessions do not automatically
+  time out under this rule.
+- On the next successful provider refresh, offline agents and working agents explicitly
+  reporting `officeActivity: "away"` have their desks cleared and are excluded from the
+  office roster and headcount. Missing agents are marked offline. Cleanup happens
+  **before** allocating new desks, and remaining desks are compacted.
+- Profiles, saved colors, usage, and activity history remain stored. Returning agents
+  receive an available desk. Joining and queued agents keep their desks; a failed provider
+  fetch does not clear the last office snapshot.
+- The existing lounge has **eight seats**. Additional couch bays are added only when
+  there are **more than eight present agents**, excluding away agents. Idle, completed,
+  joining, and queued agents still count. Filters do not change capacity; when headcount
+  shrinks, occupants of removed bays move into remaining seats.
+
+There is no extra offline desk-retention delay. The legacy `retainOfflineHours` API
+configuration field remains accepted for compatibility but no longer controls cleanup,
+and its settings control has been removed. **Send home** is a separate manual dismissal
+with an approximately **12.5-second** departure, described below.
 
 ## Security and troubleshooting
 
@@ -152,7 +233,9 @@ Completion plays a 12-second cheer, celebratory sway, and farewell wave before s
 After the celebration, completed agents relax on the couch while retaining their
 Completed status and history. Sessions already completed when the dashboard opens
 go directly to the lounge if their celebration period has elapsed. Lounge agents
-occasionally take a break at the arcade cabinet or pinball table (labelled "Playing
+occasionally visit the water cooler or kitchenette, returning with a drink or a
+different relaxation activity. They also occasionally take a break at the arcade
+cabinet or pinball table (labelled "Playing
 arcade" / "Playing pinball"); reduced motion disables these breaks.
 When a local agent's pull request is merged, it parties at its desk for 14 seconds (jump,
 wave, floss, confetti); this needs the GitHub CLI signed in (`gh auth login`). See
@@ -184,6 +267,11 @@ hook's waiting-start timestamp when available, otherwise the agent update timest
 Selecting an entry opens its profile; provider task links are available there.
 Local hooks do not expose reliable editor/terminal session links.
 Your view, zoom, pan, and display preferences are remembered in this browser.
+
+Typing `party` outside a form field (or entering the Konami code) starts a
+browser-only lounge party. Typing `boss` makes lounge agents hurry back to their
+desks and pretend to work for 15 seconds. Neither changes provider status; real work
+takes priority, and reduced motion suppresses travel and animated poses.
 
 ### Folder and agent token usage
 
@@ -234,6 +322,13 @@ server as well as the web app with `Build-Agent-Office.cmd`. The 3D text rendere
 modules and font data from the pinned unicode-font-resolver CDN path; the production
 Content Security Policy explicitly permits those resources. Font loading requires
 access to `cdn.jsdelivr.net`. Local HTTP hosting does not enable HTTPS upgrade directives.
+
+**“Preparing your office”** appears only while the initial office state is loading.
+After a successful load with no present agents, the dashboard shows **“The office is
+empty”**; scenery without desks is expected. In local mode, start or resume a connected
+Copilot session to send new lifecycle events. Offline/away agents do not keep empty desks.
+Use **Refresh** to reload the snapshot. If active agents are reported but desks still
+do not appear, check provider health, browser errors, and the server logs.
 
 Run `npm run test:production` to build the application and check that the office
 renders under production headers without browser errors, using an isolated mock database.

@@ -1,6 +1,36 @@
 import { expect, it } from "vitest";
-import { belongsInLounge, completedLoungeAt } from "./lounge-eligibility.js";
+import {
+  assignLoungeSeats,
+  belongsInLounge,
+  completedLoungeAt,
+  loungeBayCount,
+} from "./lounge-eligibility.js";
 import type { Agent } from "@agent-office/shared";
+
+it.each([
+  [0, 1],
+  [1, 1],
+  [8, 1],
+  [9, 2],
+  [16, 2],
+  [17, 3],
+])("provides %i active agents with %i lounge bays", (count, bays) =>
+  expect(loungeBayCount(count)).toBe(bays),
+);
+
+it("reclaims seats in removed bays while preserving stable seats in the remaining lounge", () => {
+  const previous = new Map([
+    ["staying", 3],
+    ["moving", 8],
+    ["away", 0],
+  ]);
+  const assignments = assignLoungeSeats(previous, ["staying", "moving"], 8);
+  expect([...assignments]).toEqual([
+    ["staying", 3],
+    ["moving", 0],
+  ]);
+  expect(assignLoungeSeats(previous, ["staying", "moving"], 9).get("moving")).toBe(8);
+});
 
 it("moves completed sessions to the lounge after celebration without changing status", () => {
   const agent = {

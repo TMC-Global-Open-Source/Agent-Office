@@ -1,4 +1,5 @@
 import type { Agent } from "./model.js";
+import { homeDeparture } from "./home-departure.js";
 
 export const officeActivities = [
   "working",
@@ -57,5 +58,13 @@ export function getOfficeActivity(agent: Agent): OfficeActivity {
   return (
     officeActivities.find((activity) => activity === value) ??
     (agent.source === "local" ? "working" : "typing")
+  );
+}
+
+export function isAwayFromOffice(agent: Pick<Agent, "status" | "metadata">): boolean {
+  if (homeDeparture(agent) !== null) return false;
+  return (
+    agent.status === "offline" ||
+    (agent.status === "working" && agent.metadata.officeActivity === "away")
   );
 }
