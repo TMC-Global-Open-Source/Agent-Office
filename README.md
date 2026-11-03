@@ -68,6 +68,10 @@ setup preserves it. Keep this file private because it may contain credentials.
 Relative database paths refer to the new installation's database, not the original
 database. Do not point two running instances at the same database.
 
+`AGENT_OFFICE_HOOK_TOKEN` can be blank in mock or GitHub mode. Local-agent mode
+requires a token of at least 32 characters; run `npm run connect:agents` in the
+destination folder to configure it and update the hooks after a move.
+
 Stop the original instance before starting another on the same port, or give each
 instance different `PORT` and `WEB_PORT` values. The launcher reuses an existing
 Agent Office on its configured port; it does not switch that server to the new folder's

@@ -13,7 +13,10 @@ const EnvSchema = z.object({
   WEB_PORT: z.coerce.number().int().min(1).max(65535).default(5173),
   DATABASE_URL: z.string().default("file:./dev.db"),
   AGENT_PROVIDER: z.enum(["mock", "github", "local"]).default("mock"),
-  AGENT_OFFICE_HOOK_TOKEN: z.string().min(32).optional(),
+  AGENT_OFFICE_HOOK_TOKEN: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional(),
+  ),
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_ORG: z.string().optional(),
   GITHUB_REPOSITORIES: z.string().default(""),
