@@ -2,17 +2,19 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { loadEnv } from "vite";
 import { resolve } from "node:path";
+import { resolveOfficePaths } from "../../scripts/office-paths.mjs";
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, resolve(process.cwd(), "../.."), "");
+  const paths = resolveOfficePaths(resolve(process.cwd(), "../.."));
+  const env = loadEnv(mode, paths.dataDirectory, "");
   const host = process.env.HOST ?? env.HOST ?? "127.0.0.1";
   const port = Number(process.env.E2E_API_PORT ?? process.env.PORT ?? env.PORT ?? 4000);
   const webPort = Number(process.env.E2E_WEB_PORT ?? process.env.WEB_PORT ?? env.WEB_PORT ?? 5173);
   return {
     plugins: [react()],
-    envDir: resolve(process.cwd(), "../.."),
+    envDir: paths.dataDirectory,
     server: {
-      host: env.HOST ?? "127.0.0.1",
+      host,
       port: webPort,
       proxy: {
         "/api": `http://${host}:${port}`,

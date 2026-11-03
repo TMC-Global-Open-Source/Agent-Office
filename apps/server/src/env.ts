@@ -1,10 +1,9 @@
-import { config } from "dotenv";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { loadOfficeEnvironment } from "../../../scripts/office-paths.mjs";
 
 export const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
-config({ path: resolve(projectRoot, ".env") });
+export const officePaths = loadOfficeEnvironment(projectRoot);
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),

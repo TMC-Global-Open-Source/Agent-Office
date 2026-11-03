@@ -1,9 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
-import { config } from "dotenv";
+import { fileURLToPath } from "node:url";
+import { loadOfficeEnvironment } from "../../../scripts/office-paths.mjs";
 
-config({ path: resolve(process.cwd(), "../../.env") });
-process.env.DATABASE_URL ??= "file:./dev.db";
+loadOfficeEnvironment(fileURLToPath(new URL("../../..", import.meta.url)));
 
 const [tool, ...args] = process.argv.slice(2);
 if (!tool || !["prisma", "tsx"].includes(tool)) {
