@@ -13,7 +13,7 @@
     "db:reset": "node scripts/prisma-cli.mjs prisma migrate reset --force"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "@agent-office/shared": "1.0.0",
     "@prisma/client": "^6.5.0",
     "@octokit/rest": "^21.1.1",

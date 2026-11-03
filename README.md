@@ -99,6 +99,17 @@ by a custom absolute `DATABASE_URL` and update machine-specific usage paths. On 
 install Node.js, then run repair with `-DataDirectory` pointing to the copied data folder.
 Do not share `.env` publicly: it may contain tokens.
 
+### Dashboard stays on reconnecting
+
+If `http://127.0.0.1:4000/api/v1/health` refuses connections, the server has stopped;
+the browser's reconnecting message alone does not identify the cause. Check
+`.agent-office\server-error.log` in the application folder. A native
+`RemoveEnvironmentCleanupHook` assertion on Node.js 24.19+ was caused by the old
+`better-sqlite3` 11.x dependency. This version uses the N-API-based 13.x library.
+Update the source **and lockfile**, then run `Repair-Agent-Office.cmd` to replace
+the installed native module and rebuild; editing `.env` or refreshing the browser
+does not repair that crash. Existing settings and database files should not be deleted.
+
 ### New chats, worktrees, and separate installations
 
 A Git worktree contains source, not ignored dependencies/builds or installation metadata.

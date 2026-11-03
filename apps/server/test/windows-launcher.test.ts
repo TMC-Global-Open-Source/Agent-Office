@@ -41,6 +41,8 @@ async function fixture() {
     `HOST=127.0.0.1\nPORT=${port}\nAGENT_PROVIDER=mock\nAGENT_OFFICE_HOOK_TOKEN=\nDATABASE_URL=file:./dev.db\n`,
   );
   const environment: NodeJS.ProcessEnv = { ...process.env, AGENT_OFFICE_DATA_DIR: data };
+  environment.COPILOT_USAGE_DB_PATH = join(data, "missing-usage.db");
+  environment.VSCODE_USAGE_TRACKING = "false";
   for (const key of [
     "HOST",
     "PORT",

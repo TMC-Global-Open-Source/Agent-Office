@@ -134,6 +134,10 @@ try {
         if ($page.StatusCode -ne 200 -or $page.Content -notmatch '<html') {
             throw 'The API started, but the built dashboard did not load.'
         }
+        foreach ($endpoint in @('history', 'attribution')) {
+            $usage = Invoke-RestMethod -Uri "$apiUrl/api/v1/usage/$endpoint" -TimeoutSec 10
+            if (-not $usage.data) { throw "The usage $endpoint startup check did not return data." }
+        }
         Write-Host 'Startup check passed: database, API and dashboard are ready.'
         exit 0
     }
