@@ -2,13 +2,15 @@ param(
     [switch]$NoBrowser,
     [switch]$Foreground,
     # Listen on the network so other computers can view the office (read-only for them).
-    [switch]$Share
+    [switch]$Share,
+    [switch]$SmokeTest
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $process = $null
 $backgroundReady = $false
+. (Join-Path $PSScriptRoot 'Office-Common.ps1')
 
 function Get-OfficeHealth([string]$url) {
     try {
@@ -67,19 +69,14 @@ function Write-ShareInfo([int]$port) {
 
 try {
     Set-Location -LiteralPath $root
-    $node = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $node) { throw 'Node.js was not found. Run Install-Agent-Office.cmd first.' }
-    $envPath = Join-Path $root '.env'
-    if (-not (Test-Path -LiteralPath $envPath)) { throw 'Settings are missing. Run Install-Agent-Office.cmd first.' }
-    $settings = @{}
-    foreach ($line in Get-Content -LiteralPath $envPath) {
-        if ($line -match '^\s*(HOST|PORT|WEB_PORT)\s*=\s*(.*?)\s*$') {
-            $settings[$Matches[1]] = $Matches[2].Trim('"', "'")
-        }
+    $node = Initialize-OfficeRuntime $root
+    if (-not (Test-Path -LiteralPath (Join-Path $root 'node_modules\dotenv'))) {
+        throw 'Dependencies are missing. Run Repair-Agent-Office.cmd.'
     }
-    foreach ($name in @('HOST', 'PORT', 'WEB_PORT')) {
-        $value = [Environment]::GetEnvironmentVariable($name)
-        if ($value) { $settings[$name] = $value }
+    $paths = Get-OfficePaths $root $node
+    $settings = Get-OfficeSettings $paths
+    if ($paths.installation.installationRoot -and $paths.installation.installationRoot -ne $root) {
+        Write-Warning 'This application folder has moved. Run Repair-Agent-Office.cmd to refresh shortcuts and hooks.'
     }
     $bindHost = if ($Share) { '0.0.0.0' } elseif ($settings.HOST) { $settings.HOST } else { '127.0.0.1' }
     $loopbackHosts = @('127.0.0.1', 'localhost', '::1')
@@ -94,6 +91,7 @@ try {
     $apiUrl = "http://${urlHost}:$port"
     $health = Get-OfficeHealth $apiUrl
     if ($health) {
+        if ($SmokeTest) { throw 'The configured port is in use. Stop that instance before setup can verify this installation.' }
         if ($health.application -ne 'copilot-agent-office') {
             throw 'The configured API port is already occupied. Close that application and retry.'
         }
@@ -102,7 +100,7 @@ try {
         }
         $dashboardUrl = if ($health.mode -eq 'production') { $apiUrl } else { "http://${urlHost}:$webPort" }
         if (-not $NoBrowser) { Start-Process $dashboardUrl }
-        Write-Host "Agent Office is already running at $dashboardUrl"
+        Write-Host "Agent Office is already running at $dashboardUrl (this does not switch it to the current folder's code)."
         if ($health.shared) { Write-ShareInfo $port }
         exit 0
     }
@@ -114,14 +112,14 @@ try {
     $env:HOST = $bindHost
     $stateDir = Join-Path $root '.agent-office'
     if ($Foreground) {
-        $process = Start-Process -FilePath $node.Source -ArgumentList @("`"$entry`"") -WorkingDirectory $root -NoNewWindow -PassThru
+        $process = Start-Process -FilePath $node -ArgumentList @("`"$entry`"") -WorkingDirectory $root -NoNewWindow -PassThru
     } else {
         New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
-        $process = Start-Process -FilePath $node.Source -ArgumentList @("`"$entry`"") -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $stateDir 'server.log') -RedirectStandardError (Join-Path $stateDir 'server-error.log')
+        $process = Start-Process -FilePath $node -ArgumentList @("`"$entry`"") -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $stateDir 'server.log') -RedirectStandardError (Join-Path $stateDir 'server-error.log')
     }
     $ready = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        if ($process.HasExited) { throw 'Agent Office stopped during startup. Review .agent-office\server-error.log (or the foreground console).' }
+        if ($process.HasExited) { throw 'Agent Office stopped during startup.' }
         $health = Get-OfficeHealth $apiUrl
         if ($health) {
             if ($health.application -ne 'copilot-agent-office') { throw 'Another application is using the configured port.' }
@@ -131,6 +129,14 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if (-not $ready) { throw 'Agent Office did not become ready. Review .agent-office\server-error.log (or the foreground console) and .env settings.' }
+    if ($SmokeTest) {
+        $page = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 10
+        if ($page.StatusCode -ne 200 -or $page.Content -notmatch '<html') {
+            throw 'The API started, but the built dashboard did not load.'
+        }
+        Write-Host 'Startup check passed: database, API and dashboard are ready.'
+        exit 0
+    }
     if (-not $Foreground) {
         @{
             pid = $process.Id
@@ -151,10 +157,19 @@ try {
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { throw "Agent Office exited with code $($process.ExitCode)." }
 } catch {
+    if ($process -and -not $Foreground) {
+        $logPath = Join-Path $root '.agent-office\server-error.log'
+        if (Test-Path -LiteralPath $logPath) {
+            Write-Host ''
+            Write-Host 'Server error output (keep private; redact credentials before sharing):'
+            Get-Content -LiteralPath $logPath -Tail 30 | ForEach-Object { Write-Host $_ }
+        }
+    }
     Write-Error $_ -ErrorAction Continue
     exit 1
 } finally {
     if ($process -and -not $backgroundReady -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
+        $process.WaitForExit()
     }
 }

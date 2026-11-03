@@ -70,8 +70,8 @@ void loadSavedConfig()
     return refresh();
   })
   .then(scheduleRefresh)
-  .catch(async () => {
-    console.error("Application startup failed while loading local settings.");
+  .catch(async (error: unknown) => {
+    console.error("Application startup failed while loading local settings.", error);
     await prisma.$disconnect();
     process.exitCode = 1;
   });

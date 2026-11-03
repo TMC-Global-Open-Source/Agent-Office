@@ -1,10 +1,9 @@
-import { config } from "dotenv";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { loadOfficeEnvironment } from "../../../scripts/office-paths.mjs";
 
 export const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
-config({ path: resolve(projectRoot, ".env") });
+export const officePaths = loadOfficeEnvironment(projectRoot);
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -13,7 +12,10 @@ const EnvSchema = z.object({
   WEB_PORT: z.coerce.number().int().min(1).max(65535).default(5173),
   DATABASE_URL: z.string().default("file:./dev.db"),
   AGENT_PROVIDER: z.enum(["mock", "github", "local"]).default("mock"),
-  AGENT_OFFICE_HOOK_TOKEN: z.string().min(32).optional(),
+  AGENT_OFFICE_HOOK_TOKEN: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional(),
+  ),
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_ORG: z.string().optional(),
   GITHUB_REPOSITORIES: z.string().default(""),

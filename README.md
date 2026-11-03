@@ -8,8 +8,13 @@ A locally hosted monitoring dashboard for GitHub Copilot agents. The office is a
 
 Install **Node.js LTS 22.13 or newer** and npm, then double-click
 `Install-Agent-Office.cmd`. Setup installs dependencies, applies database migrations,
-builds the app, and creates a **Copilot Agent Office** desktop shortcut. It does not
-reset your database, overwrite an existing `.env`, or require administrator rights.
+builds the app, verifies database/API/dashboard startup, and creates a **Copilot Agent Office**
+desktop shortcut. Settings and the SQLite database are stored outside the source folder
+in **`%LOCALAPPDATA%\AgentOffice`** (`.env` and `dev.db`). Setup does not reset your
+database, overwrite existing settings, or require administrator rights.
+If the system Node.js is too old, the scripts also try your installed `fnm` default.
+Setup remembers a stable Node executable for desktop launches and lifecycle hooks;
+it never downloads or upgrades Node automatically.
 
 Double-click the shortcut (or `Launch-Agent-Office.cmd`) to start the built app and
 open your browser. The launcher runs the server in the background; its window can close.
@@ -48,28 +53,67 @@ To also install the user-level Copilot lifecycle hooks during setup, run:
 .\Install-Agent-Office.cmd -ConnectAgents
 ```
 
-Keep the repository folder in place: shortcuts and hooks reference it. Stop the
-running office before rerunning setup after an update (Windows locks native database
-libraries while they are in use). For scripted use, setup accepts `-NoShortcut` and
+Setup stops a background server whose saved ownership matches this folder. Close
+foreground/development servers before setup (Windows locks native database libraries).
+For scripted use, setup accepts `-NoShortcut` and
 the launcher accepts `-NoBrowser`. Node.js is a prerequisite, not bundled or installed
 automatically. This is a local source-folder installation, not a standalone `.exe`.
 
+### Move or repair an installation
+
+1. Run `Stop-Agent-Office.cmd` **before** moving the old folder. Close any foreground/dev server.
+2. Move the entire application folder, then double-click **`Repair-Agent-Office.cmd`**
+   in its new location.
+3. After repair reports success, use the refreshed desktop shortcut or `Launch-Agent-Office.cmd`.
+
+Repair reinstalls dependencies, migrates the database schema without resetting data,
+rebuilds, refreshes the runtime and shortcut, reconnects hooks when local-agent mode
+is enabled, and verifies that the API and dashboard actually start. The check stops
+its temporary server afterwards. A port occupied by another instance makes the check
+fail rather than mistakenly validating the other server. Startup failures display
+the server error directly; logs may contain private information, so redact before sharing.
+
+On the same computer, per-user settings/data stay in place when the application moves.
+`.agent-office\installation.json` records the selected data directory and Node executable;
+logs and background-process ownership remain in `.agent-office` under the application folder.
+Do not move a running server: repair refuses to stop a process whose ownership no longer matches.
+
+For an **older installation** with `.env` in the application folder, setup/repair copies
+its settings and SQLite database into the per-user folder. SQLite's backup API includes
+committed WAL contents. The original `.env` and database are left unchanged as a fallback;
+after migration they are no longer the active files. A missing legacy database or conflicting
+destination data stops migration rather than creating an empty replacement or overwriting data.
+If both old and per-user settings exist, select which installation to retain explicitly:
+
+```powershell
+# Reuse the already-migrated per-user office instead of importing this folder's old data.
+.\Repair-Agent-Office.cmd -UseExistingData
+
+# Or migrate this folder into its own, new data directory.
+.\Repair-Agent-Office.cmd -DataDirectory 'C:\AgentOfficeData\SecondOffice'
+```
+
+For a **different computer**, stop the old server and securely copy both the source folder
+and its active data folder (`.env` and `dev.db`). Also preserve any database referenced
+by a custom absolute `DATABASE_URL` and update machine-specific usage paths. On the destination,
+install Node.js, then run repair with `-DataDirectory` pointing to the copied data folder.
+Do not share `.env` publicly: it may contain tokens.
+
 ### New chats, worktrees, and separate installations
 
-A Copilot chat may create a separate Git worktree. That folder contains source code,
-but does **not** inherit the original installation's ignored `.env`, SQLite database,
-dependencies, or built application files. Changes in a worktree do not automatically
-update the original installation.
+A Git worktree contains source, not ignored dependencies/builds or installation metadata.
+Windows setup defaults to the same per-user office on that computer. For an independent
+instance, use `Install-Agent-Office.cmd -DataDirectory <new-absolute-directory>`, assign
+different `PORT` and `WEB_PORT` values in that directory's `.env`, and never run two
+instances against the same database. `AGENT_OFFICE_DATA_DIR` is also supported as an
+absolute-path process environment override. Without setup metadata or that override,
+a root `.env` remains supported for legacy/development use; otherwise per-user settings are used.
 
-If launch reports **“Settings are missing”**, the new folder has no `.env`.
-For an independent installation, run `Install-Agent-Office.cmd` in that folder.
-To reuse startup configuration, first copy your original `.env` into the new folder;
-setup preserves it. Keep this file private because it may contain credentials.
-Relative database paths refer to the new installation's database, not the original
-database. Do not point two running instances at the same database.
+`AGENT_OFFICE_HOOK_TOKEN` can be blank in mock or GitHub mode. Local-agent mode
+requires a token of at least 32 characters; run `npm run connect:agents` in the
+destination folder to configure it and update the hooks after a move.
 
-Stop the original instance before starting another on the same port, or give each
-instance different `PORT` and `WEB_PORT` values. The launcher reuses an existing
+Stop the original instance before starting another on the same port. The launcher reuses an existing
 Agent Office on its configured port; it does not switch that server to the new folder's
 code. Setup creates a desktop shortcut pointing to its own folder; use `-NoShortcut`
 to keep an existing shortcut unchanged.
@@ -123,15 +167,15 @@ The default mock workspace is sample data. To connect local Copilot CLI and VS C
 npm run connect:agents
 ```
 
-This creates a user-level Copilot hook file under `%USERPROFILE%\.copilot\hooks` on Windows (or `~/.copilot/hooks` elsewhere), generates a local bearer token in `.env`, and switches `AGENT_PROVIDER` to `local`. Restart the server (`Restart-Agent-Office.cmd` for the built app, or restart `npm run dev`), then start or resume Copilot CLI sessions or VS Code **local** agent-harness sessions. The dashboard will show real sessions as their lifecycle events arrive; it does not import the mock roster into local mode. Use `npm run disconnect:agents` to remove the Agent Office hook file and return to mock mode.
+This creates a user-level Copilot hook file under `%USERPROFILE%\.copilot\hooks` on Windows (or `~/.copilot/hooks` elsewhere), generates a local bearer token in the active `.env`, and switches `AGENT_PROVIDER` to `local`. Restart the server (`Restart-Agent-Office.cmd` for the built app, or restart `npm run dev`), then start or resume Copilot CLI sessions or VS Code **local** agent-harness sessions. The dashboard will show real sessions as their lifecycle events arrive; it does not import the mock roster into local mode. Use `npm run disconnect:agents` to remove the Agent Office hook file and return to mock mode.
 
 Hooks reference the installation folder. To move monitoring to a new installation,
-run `npm run connect:agents` from the destination folder and restart its server.
+run `Repair-Agent-Office.cmd` (or `npm run connect:agents`) from the destination folder and restart its server.
 Changing only the browser URL does not redirect lifecycle hooks.
 Only one Agent Office hook registration is installed per user. The generated hook
-file targets API port **4000**; if the destination uses a different port, update
-`AGENT_OFFICE_HOOK_URL` in each event entry of that hook file to match. Rerunning
-`connect:agents` regenerates those entries with the default port.
+file uses the configured API `PORT` and an absolute Node executable, including paths
+with spaces. After changing the port or removing/upgrading that Node installation,
+run repair or `connect:agents` again to refresh the registration.
 
 The hook bridge listens only on the loopback API and authenticates with the generated token. It sends lifecycle event, opaque session identity, runtime, and workspace folder name only—never prompts, transcripts, tool arguments, or tool results. CLI session-end hooks report completion/error; VS Code local hooks report working/idle lifecycle events. Remote/cloud VS Code sessions do not report to this local bridge.
 
@@ -182,6 +226,7 @@ are stored separately in the browser's local storage.
 | `npm run lint` / `npm run typecheck`                   | Static checks                                                                                         |
 | `npm run test` / `npm run test:e2e`                    | Unit/integration and Playwright checks (install Chromium once with `npx playwright install chromium`) |
 | `npm run test:production`                              | Build and check rendering under production security headers using an isolated mock database           |
+| `npm run test:install`                                 | Build and check migration/repair; Windows also starts isolated temporary production servers            |
 | `npm run format`                                       | Format supported source                                                                               |
 | `npm run db:migrate` / `npm run db:seed`               | Set up and seed local SQLite                                                                          |
 | `npm run db:reset`                                     | Reset local development data                                                                          |

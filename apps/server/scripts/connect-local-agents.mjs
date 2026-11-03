@@ -3,9 +3,12 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { parse } from "dotenv";
+import { resolveOfficePaths } from "../../../scripts/office-paths.mjs";
 
 const root = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
-const envPath = join(root, ".env");
+const { envPath } = resolveOfficePaths(root);
 const hookDir = join(process.env.USERPROFILE ?? homedir(), ".copilot", "hooks");
 const hookPath = join(hookDir, "agent-office.json");
 const helperPath = join(root, "apps", "server", "scripts", "local-agent-hook.mjs");
@@ -51,7 +54,14 @@ async function install() {
     if (error?.code !== "ENOENT") throw error;
   }
 
-  const command = `node "${helperPath.replaceAll('"', '\\"')}"`;
+  const settings = parse(envText);
+  const port = Number(process.env.PORT ?? settings.PORT ?? 4000);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("PORT must be between 1 and 65535 before connecting agents.");
+  }
+  const host = (process.env.HOST ?? settings.HOST) === "::1" ? "[::1]" : "127.0.0.1";
+  const nodePath = realpathSync(process.execPath);
+  const command = `"${nodePath.replaceAll('"', '\\"')}" "${helperPath.replaceAll('"', '\\"')}"`;
   const events = [
     "sessionStart",
     "userPromptSubmitted",
@@ -72,10 +82,10 @@ async function install() {
         {
           type: "command",
           command: `${command} ${event}`,
-          powershell: `${command} ${event}`,
+          powershell: `& '${nodePath.replaceAll("'", "''")}' '${helperPath.replaceAll("'", "''")}' ${event}`,
           env: {
             AGENT_OFFICE_HOOK_TOKEN: token,
-            AGENT_OFFICE_HOOK_URL: "http://127.0.0.1:4000/api/v1/local/hooks",
+            AGENT_OFFICE_HOOK_URL: `http://${host}:${port}/api/v1/local/hooks`,
           },
           timeoutSec: 5,
         },

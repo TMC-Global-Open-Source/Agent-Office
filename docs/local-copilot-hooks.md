@@ -7,10 +7,16 @@ Agent Office can receive lifecycle events from Copilot CLI and VS Code agents th
 Run `npm run connect:agents` from the repository root. The installer:
 
 - creates or updates `%USERPROFILE%\.copilot\hooks\agent-office.json` on Windows (`~/.copilot/hooks/agent-office.json` on macOS/Linux);
-- adds a random bearer token to the root `.env` and switches `AGENT_PROVIDER` to `local`;
+- adds a random bearer token to the active `.env` (normally `%LOCALAPPDATA%\AgentOffice\.env` after Windows setup; root `.env` for unmigrated/development installations) and switches `AGENT_PROVIDER` to `local`;
+- uses the configured API port and a stable, absolute Node executable, not the invoking application's `PATH`;
 - registers session, prompt, tool, stop, and subagent lifecycle hooks.
 
 Restart Agent Office after installation. Start or resume local Copilot CLI or VS Code sessions to populate the office. Hooks are installed at user scope and therefore apply to eligible local sessions in any workspace. Remove this integration with `npm run disconnect:agents`; it removes only the Agent Office hook file and restores mock mode.
+
+Stop the server before moving its folder, then run `Repair-Agent-Office.cmd` in the
+destination. Repair reconnects hooks automatically when the saved provider is `local`.
+It preserves the token so hooks and server continue to agree. Rerun repair or
+`connect:agents` after changing the API port or replacing the registered Node runtime.
 
 ## Data and status
 

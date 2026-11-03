@@ -2,6 +2,9 @@
   "name": "copilot-agent-office",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -15,6 +18,7 @@
     "test": "npm run test --workspace @agent-office/shared && npm run test --workspace @agent-office/server && npm run test --workspace @agent-office/web",
     "test:e2e": "npm run test:e2e --workspace @agent-office/web",
     "test:production": "npm run build && cross-env PRODUCTION_RENDER_TEST=true playwright test --config apps/web/playwright.production.config.ts",
+    "test:install": "npm run build && cross-env AGENT_OFFICE_INSTALL_TEST=true npm exec --workspace @agent-office/server -- vitest run test/env.test.ts test/installation.test.ts test/windows-launcher.test.ts",
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspace @agent-office/shared && npm run typecheck --workspace @agent-office/server && npm run typecheck --workspace @agent-office/web",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,css,html}\"",

@@ -7,5 +7,7 @@ test-results/
 .agent-office/
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 apps/server/prisma/dev.db
 apps/server/prisma/dev.db-journal
