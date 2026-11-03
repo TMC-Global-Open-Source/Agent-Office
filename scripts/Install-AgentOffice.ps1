@@ -29,6 +29,8 @@ try {
     $settings = Get-OfficeSettings $paths
     & $node (Join-Path $root 'scripts\manage-installation.mjs') check-port
     if ($LASTEXITCODE -ne 0) { throw 'Close the existing server before setup continues. Database migrations were not run.' }
+    & $node (Join-Path $root 'scripts\office-maintenance.mjs') backup
+    if ($LASTEXITCODE -ne 0) { throw 'Backup failed. Database migrations were not run.' }
     & $npm run db:migrate
     if ($LASTEXITCODE -ne 0) { throw 'Database migration failed. Review the output above.' }
     & $npm run build

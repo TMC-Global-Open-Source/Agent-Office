@@ -95,9 +95,9 @@ async function install() {
   await mkdir(hookDir, { recursive: true });
   await writeFile(hookPath, `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`, "utf8");
   await writeFile(envPath, envText, "utf8");
-  console.log(`Connected Copilot CLI and VS Code local-agent hooks at ${hookPath}.`);
+  console.log(`Registered Copilot CLI / compatible local-agent hooks at ${hookPath}.`);
   console.log(
-    "Restart Agent Office and start or resume a local Copilot session to see live agents.",
+    "Registration is not proof of delivery. Restart Agent Office and submit a prompt in a new local CLI session; check Diagnose-Agent-Office.cmd for the last received hook. Desktop-app hook loading is unverified.",
   );
 }
 

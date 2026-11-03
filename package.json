@@ -1,5 +1,7 @@
 {
   "name": "copilot-agent-office",
+  "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
@@ -22,6 +24,7 @@
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspace @agent-office/shared && npm run typecheck --workspace @agent-office/server && npm run typecheck --workspace @agent-office/web",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,css,html}\"",
+    "release:preview": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Build-Release.ps1",
     "db:migrate": "npm run db:migrate --workspace @agent-office/server",
     "db:seed": "npm run db:seed --workspace @agent-office/server",
     "db:reset": "npm run db:reset --workspace @agent-office/server",
