@@ -4,6 +4,10 @@ A locally hosted monitoring dashboard for GitHub Copilot agents. The office is a
 
 ## Quick start
 
+**Technical preview:** Windows source installation; Node.js and internet access
+are required. See [distribution, recovery and uninstall](docs/distribution.md)
+for release ZIPs/checksums, supported integrations and upgrade rollback.
+
 ### Windows one-click setup and launch
 
 Install **Node.js LTS 22.13 or newer** and npm, then double-click
@@ -99,6 +103,17 @@ by a custom absolute `DATABASE_URL` and update machine-specific usage paths. On 
 install Node.js, then run repair with `-DataDirectory` pointing to the copied data folder.
 Do not share `.env` publicly: it may contain tokens.
 
+### Dashboard stays on reconnecting
+
+If `http://127.0.0.1:4000/api/v1/health` refuses connections, the server has stopped;
+the browser's reconnecting message alone does not identify the cause. Check
+`.agent-office\server-error.log` in the application folder. A native
+`RemoveEnvironmentCleanupHook` assertion on Node.js 24.19+ was caused by the old
+`better-sqlite3` 11.x dependency. This version uses the N-API-based 13.x library.
+Update the source **and lockfile**, then run `Repair-Agent-Office.cmd` to replace
+the installed native module and rebuild; editing `.env` or refreshing the browser
+does not repair that crash. Existing settings and database files should not be deleted.
+
 ### New chats, worktrees, and separate installations
 
 A Git worktree contains source, not ignored dependencies/builds or installation metadata.
@@ -160,6 +175,10 @@ Set `AGENT_PROVIDER=github`, `GITHUB_TOKEN`, and `GITHUB_ORG` in `.env`. Optiona
 GitHub does not expose a general Copilot coding-agent session/telemetry API. GitHub mode therefore reports **inferred** activity from supported repository activity, checks, workflows, issues, and pull requests; the application does not claim direct session telemetry. Provider snapshots are retained on transient failure.
 
 ## Connect local Copilot sessions
+
+CLI hook delivery is verified. Desktop-app hook loading is **unverified**;
+creating a hook file is not proof of connectivity. Run `Diagnose-Agent-Office.cmd`
+and check the last received hook after submitting a prompt in a new local CLI session.
 
 The default mock workspace is sample data. To connect local Copilot CLI and VS Code agent sessions instead, run this once from the repository root:
 
