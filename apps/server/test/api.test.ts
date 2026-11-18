@@ -67,6 +67,40 @@ describe("Agent Office API", () => {
     const response = await request(app).get("/api/v1/agents").expect(200);
     expect(response.body.data).toEqual([]);
   });
+  it("serves reports directly, includes historical agents, and rejects invalid filters", async () => {
+    const reader = vi
+      .spyOn(usageAttribution, "readDailyAttributedUsage")
+      .mockReturnValue({ sources: [], usage: [] });
+    try {
+      await syncAgents();
+      const agent = await prisma.agent.findFirstOrThrow();
+      await prisma.agent.update({
+        where: { id: agent.id },
+        data: { metadata: JSON.stringify({ archivedAt: new Date().toISOString() }) },
+      });
+      const response = await request(app)
+        .get("/api/v1/reports/agents")
+        .query({ start: "2026-11-18", end: "2026-11-18", agentId: agent.id })
+        .expect(200);
+      expect(response.body.data.timezone).toBe("UTC");
+      expect(response.body.data.agents.some((item: { id: string }) => item.id === agent.id)).toBe(
+        true,
+      );
+      expect(response.body.data.days).toMatchObject([
+        { agentId: agent.id, date: "2026-11-18", workingMilliseconds: null },
+      ]);
+      await request(app)
+        .get("/api/v1/reports/agents")
+        .query({ start: "2026-02-30", end: "2026-03-01" })
+        .expect(400);
+      await request(app)
+        .get("/api/v1/reports/agents")
+        .query({ start: "2026-11-18", end: "2026-11-18", agentId: "unknown" })
+        .expect(400);
+    } finally {
+      reader.mockRestore();
+    }
+  });
 
   it("validates config and never accepts a token field", async () => {
     const response = await request(app)

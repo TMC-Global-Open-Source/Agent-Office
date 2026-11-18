@@ -1,5 +1,49 @@
 import { expect, test } from "@playwright/test";
 
+test("built reporting supports filtered groups and loads its theme under the production security policy", async ({
+  page,
+}) => {
+  test.skip(
+    !process.env.PRODUCTION_RENDER_TEST,
+    "Runs with the production Playwright configuration.",
+  );
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/?scoutTheme=dark");
+  await expect(page.locator(".roster-item").first()).toBeVisible();
+  await page.locator(".roster-item").first().click();
+  await expect(page.locator(".detail-panel")).toBeVisible();
+  await page.getByRole("button", { name: "View agent report", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Agent reporting" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("checkbox").first()).toBeVisible();
+  await expect(dialog.getByRole("checkbox").first()).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(dialog).toHaveCSS("background-color", "rgb(61, 59, 58)");
+  await dialog.getByRole("checkbox").nth(1).check();
+  await dialog.getByLabel("From (UTC)").fill("2026-11-18");
+  await dialog.getByLabel("Through (UTC)").fill("2026-11-19");
+  await dialog.getByRole("button", { name: "Apply filters / refresh" }).click();
+  await expect(dialog.getByRole("table").locator("tbody tr")).toHaveCount(2);
+  await expect(
+    dialog.getByRole("region", { name: "Daily Active working time chart" }),
+  ).toContainText("Not recorded");
+  await dialog.getByRole("combobox", { name: "View", exact: true }).selectOption("comparison");
+  await expect(dialog.getByRole("table").locator("tbody tr")).toHaveCount(4);
+  await dialog
+    .getByRole("combobox", { name: "Chart metric", exact: true })
+    .selectOption("aiCredits");
+  await expect(dialog.getByRole("region", { name: "Daily AI credits chart" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Reports", exact: true })).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
 test("built office renders under the production security policy", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   test.skip(

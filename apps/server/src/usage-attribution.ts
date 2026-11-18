@@ -15,6 +15,9 @@ import type {
 } from "@agent-office/shared";
 
 interface Row extends TokenCounts {
+  date: string | null;
+  inputTokenCalls: number;
+  outputTokenCalls: number;
   sessionId: string;
   childId: string | null;
   parentCall: string | null;
@@ -46,7 +49,10 @@ export function folderName(cwd: string | null | undefined): string | null {
   return name ? name.slice(0, 128) : null;
 }
 
-interface Usage {
+export interface AttributedUsage {
+  date: string | null;
+  inputTokenCalls: number;
+  outputTokenCalls: number;
   source: UsageSourceId;
   sessionId: string;
   folder: string | null;
@@ -61,7 +67,8 @@ function readCli(
   path: string,
   since: string,
   asOf: string,
-): { status: UsageSourceStatus; usage: Usage[] } {
+  daily = false,
+): { status: UsageSourceStatus; usage: AttributedUsage[] } {
   const status: UsageSourceStatus = {
     ...emptyCounts(),
     source: "copilot-cli",
@@ -98,6 +105,8 @@ function readCli(
       .prepare(
         `
       SELECT u.session_id AS sessionId, u.agent_id AS childId,
+        ${daily ? "date(u.created_at)" : "NULL"} AS date,
+        COUNT(u.input_tokens) AS inputTokenCalls, COUNT(u.output_tokens) AS outputTokenCalls,
         u.parent_tool_call_id AS parentCall, NULLIF(TRIM(s.repository), '') AS repository,
         ${cwd ? "s.cwd" : "NULL"} AS cwd,
         SUM(u.input_tokens) AS inputTokens, SUM(u.output_tokens) AS outputTokens, COUNT(*) AS calls,
@@ -105,7 +114,7 @@ function readCli(
         ${credits ? "COUNT(u.total_nano_aiu)" : "0"} AS aiCreditCalls
       FROM assistant_usage_events u LEFT JOIN sessions s ON s.id = u.session_id
       WHERE julianday(u.created_at) >= julianday(?) AND julianday(u.created_at) <= julianday(?)
-      GROUP BY u.session_id, u.agent_id, u.parent_tool_call_id, s.repository${cwd ? ", s.cwd" : ""}
+      GROUP BY u.session_id, u.agent_id, u.parent_tool_call_id, s.repository${cwd ? ", s.cwd" : ""}${daily ? ", date(u.created_at)" : ""}
     `,
       )
       .all(since, asOf) as Row[];
@@ -116,7 +125,7 @@ function readCli(
     );
     const officeId = (session: string, child = "main") =>
       stableAgentId({ runtime: "copilot-cli", sessionId: session, subagentId: child });
-    const usage = rows.map((row): Usage => {
+    const usage = rows.map((row): AttributedUsage => {
       // A root session must never inherit child calls. Unknown child identities stay unattributed.
       const rootId = officeId(row.sessionId);
       const id = row.childId && row.parentCall ? officeId(row.sessionId, row.childId) : rootId;
@@ -128,6 +137,9 @@ function readCli(
       const { inputTokens, outputTokens, calls, aiCredits, aiCreditCalls } = row;
       addCounts(status, row);
       return {
+        date: row.date,
+        inputTokenCalls: row.inputTokenCalls,
+        outputTokenCalls: row.outputTokenCalls,
         source: "copilot-cli",
         sessionId: row.sessionId,
         folder: folderName(row.cwd),
@@ -151,7 +163,8 @@ function readVsCode(
   path: string | null,
   since: string,
   asOf: string,
-): { status: UsageSourceStatus; usage: Usage[] } {
+  daily = false,
+): { status: UsageSourceStatus; usage: AttributedUsage[] } {
   const status: UsageSourceStatus = {
     ...emptyCounts(),
     source: "vscode",
@@ -172,30 +185,54 @@ function readVsCode(
       )
       .map((agent) => agent.id),
   );
-  const usage = result.sessions.map((session): Usage => {
-    const counts = emptyCounts();
+  const usage = result.sessions.flatMap((session): AttributedUsage[] => {
+    const groups = new Map<string | null, typeof session.requests>();
     for (const request of session.requests) {
-      addCounts(counts, {
-        inputTokens: request.inputTokens,
-        outputTokens: request.outputTokens,
-        calls: 1,
-        aiCredits: request.aiCredits,
-        aiCreditCalls: request.aiCredits === null ? 0 : 1,
-      });
+      const date = daily ? new Date(request.timestamp).toISOString().slice(0, 10) : null;
+      const group = groups.get(date) ?? [];
+      group.push(request);
+      groups.set(date, group);
     }
-    addCounts(status, counts);
-    // VS Code hooks report the chat session ID, so a chat log maps to exactly one root agent.
-    const id = stableAgentId({ runtime: "vscode", sessionId: session.sessionId });
-    return {
-      source: "vscode",
-      sessionId: session.sessionId,
-      folder: session.folder,
-      repository: null,
-      agentId: known.has(id) ? id : null,
-      counts,
-    };
+    return [...groups].map(([date, requests]): AttributedUsage => {
+      const counts = emptyCounts();
+      for (const request of requests) {
+        addCounts(counts, {
+          inputTokens: request.inputTokens,
+          outputTokens: request.outputTokens,
+          calls: 1,
+          aiCredits: request.aiCredits,
+          aiCreditCalls: request.aiCredits === null ? 0 : 1,
+        });
+      }
+      addCounts(status, counts);
+      // VS Code hooks report the chat session ID, so a chat log maps to exactly one root agent.
+      const id = stableAgentId({ runtime: "vscode", sessionId: session.sessionId });
+      return {
+        date,
+        inputTokenCalls: requests.filter((request) => request.inputTokens !== null).length,
+        outputTokenCalls: requests.filter((request) => request.outputTokens !== null).length,
+        source: "vscode",
+        sessionId: session.sessionId,
+        folder: session.folder,
+        repository: null,
+        agentId: known.has(id) ? id : null,
+        counts,
+      };
+    });
   });
   return { status, usage };
+}
+
+export function readDailyAttributedUsage(
+  agents: Agent[],
+  since: string,
+  until: string,
+  path = join(homedir(), ".copilot", "session-store.db"),
+  vscodePath: string | null = defaultVsCodeUserDataPath(),
+) {
+  const cli = readCli(agents, path, since, until, true);
+  const vscode = readVsCode(agents, vscodePath, since, until, true);
+  return { sources: [cli.status, vscode.status], usage: [...cli.usage, ...vscode.usage] };
 }
 
 export function readUsageAttribution(

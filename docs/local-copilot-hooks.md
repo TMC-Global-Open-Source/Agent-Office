@@ -83,6 +83,19 @@ sends the folder.
 
 ## Token usage
 
+The **Reports** toolbar action adds UTC daily graphs and tables for arbitrary agent
+selections. Active working intervals are persisted separately from the visible office
+roster, so dismissed agents retain their reports. Recording begins with local hooks
+after the reporting schema upgrade, not with historical token calls. Session start
+does not start the runtime clock; working events do, and turn/session stops end it
+without counting prompt-wait or idle-delay time. Missing stop hooks are bounded by
+the offline timeout. An unsignaled wait (for example a tool approval) cannot be
+distinguished from work. Runtime is checkpointed on refresh and retained only through
+the last checkpoint after a server restart; server downtime is not reconstructed.
+Combined durations sum agent time, including overlap, rather than unioning intervals.
+Reports reuse the exact-identity usage readers described below, independently of
+the cumulative `tokensUsed` value.
+
 Each agent stores a nullable `tokensUsed` count, shown as **Tokens used** in its profile.
 The dashboard roster and accessible list also show each agent's count; the **Token usage**
 card explains telemetry availability and how many sessions have reported counts.

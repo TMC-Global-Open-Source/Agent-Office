@@ -25,13 +25,16 @@ import { env, projectRoot } from "./env.js";
 import { z, ZodError } from "zod";
 import { MockAgentProvider } from "./providers/mock.js";
 import { GitHubAgentProvider } from "./providers/github.js";
-import { LocalHooksProvider } from "./providers/local-hooks.js";
+import { LocalHooksProvider, LocalHookEventSchema } from "./providers/local-hooks.js";
 import { ghPullRequestLookup } from "./providers/pull-request-watch.js";
 import type { AgentProvider } from "./providers/types.js";
 import { randomAvatarColor } from "./avatar-color.js";
 import { readUsageHistory } from "./usage-history.js";
 import { readUsageAttribution } from "./usage-attribution.js";
 import { defaultVsCodeUserDataPath } from "./vscode-usage.js";
+import { AgentRuntimeRecorder } from "./agent-runtime.js";
+import { buildAgentReport, ReportQuery } from "./agent-report.js";
+import { readDailyAttributedUsage } from "./usage-attribution.js";
 
 function vscodeUsagePath(): string | null {
   if (env.VSCODE_USAGE_TRACKING === "false") return null;
@@ -39,6 +42,7 @@ function vscodeUsagePath(): string | null {
 }
 
 export const prisma = new PrismaClient();
+export const runtimeRecorder = new AgentRuntimeRecorder(prisma);
 export const mockProvider = new MockAgentProvider();
 export const localHooksProvider = new LocalHooksProvider();
 localHooksProvider.watchPullRequests(
@@ -215,6 +219,7 @@ export async function compactStoredDesks(): Promise<void> {
 }
 
 async function performSyncAgents(): Promise<Agent[]> {
+  await runtimeRecorder.heartbeat(config.offlineThresholdMinutes);
   const incoming = (await provider.fetchAgents()).map((agent) => AgentSchema.parse(agent));
   const known = await prisma.agent.findMany({
     where: provider.name === "local" ? { source: "local" } : undefined,
@@ -492,6 +497,52 @@ app.get("/api/v1/usage/attribution", async (_request, response, next) => {
     next(error);
   }
 });
+app.get("/api/v1/reports/agents", async (request, response, next) => {
+  try {
+    const query = ReportQuery.parse(request.query);
+    const agents = (
+      await prisma.agent.findMany({
+        include: { desk: true, avatar: true },
+        orderBy: [{ displayName: "asc" }, { id: "asc" }],
+      })
+    ).map(publicAgent);
+    if (query.agentId.some((id) => !agents.some((agent) => agent.id === id))) {
+      return response.status(400).json({
+        error: {
+          code: "INVALID_AGENT",
+          message: "One or more selected agents no longer exist. Reload the report.",
+        },
+      });
+    }
+    const since = `${query.start}T00:00:00.000Z`;
+    const until = new Date(Date.parse(query.end) + 86_400_000 - 1).toISOString();
+    const now = new Date();
+    await runtimeRecorder.heartbeat(config.offlineThresholdMinutes, now);
+    const states = await prisma.agentRunState.findMany();
+    const observedDays = await prisma.agentRuntimeDay.findMany({
+      where: { agentId: { in: query.agentId }, date: { gte: query.start, lte: query.end } },
+    });
+    const intervals = await prisma.agentWorkingInterval.findMany({
+      where: {
+        agentId: { in: query.agentId },
+        startedAt: { lt: new Date(Date.parse(until) + 1) },
+        endedAt: { gt: new Date(since) },
+      },
+    });
+    const usage = readDailyAttributedUsage(
+      agents,
+      since,
+      new Date(Math.min(Date.parse(until), now.getTime())).toISOString(),
+      env.COPILOT_USAGE_DB_PATH,
+      vscodeUsagePath(),
+    );
+    return response.json({
+      data: buildAgentReport(agents, states, intervals, query, usage, now, observedDays),
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 app.get("/api/v1/usage/history", (_request, response, next) => {
   try {
     response.json({
@@ -670,6 +721,7 @@ app.post("/api/v1/refresh", async (_request, response, next) => {
     next(error);
   }
 });
+let pendingHook: Promise<unknown> = Promise.resolve();
 app.post("/api/v1/local/hooks", async (request, response, next) => {
   try {
     if (provider.name !== "local") {
@@ -688,8 +740,20 @@ app.post("/api/v1/local/hooks", async (request, response, next) => {
         .status(401)
         .json({ error: { code: "UNAUTHORIZED", message: "Local hook authentication failed." } });
     }
-    localHooksProvider.recordEvent(request.body);
-    const agents = await syncAgents();
+    const event = LocalHookEventSchema.parse(request.body);
+    const operation = pendingHook.then(async () => {
+      if (activeSync) await activeSync;
+      const agent = localHooksProvider.recordEvent(event);
+      const agents = await syncAgents();
+      await runtimeRecorder.record(agent.id, event, config.offlineThresholdMinutes);
+      return agents;
+    });
+    // Keep the queue usable after a failed request, while returning the failure to its caller.
+    pendingHook = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    const agents = await operation;
     return response.json({ data: agents.filter((agent) => agent.source === "local") });
   } catch (error) {
     return next(error);

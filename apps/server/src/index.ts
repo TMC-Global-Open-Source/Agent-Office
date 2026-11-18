@@ -8,6 +8,7 @@ import {
   prisma,
   provider,
   syncAgents,
+  runtimeRecorder,
 } from "./app.js";
 import { env } from "./env.js";
 
@@ -62,7 +63,9 @@ const scheduleRefresh = () => {
   timer.unref();
 };
 
-void loadSavedConfig()
+void runtimeRecorder
+  .recover()
+  .then(loadSavedConfig)
   .then(() => {
     server.listen(env.PORT, env.HOST, () => {
       console.info(`Agent Office API listening on http://${env.HOST}:${env.PORT}`);

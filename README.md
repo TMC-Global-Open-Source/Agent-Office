@@ -2,6 +2,38 @@
 
 A locally hosted monitoring dashboard for GitHub Copilot agents. The office is a procedural, low-poly 3D scene; agent status is explicitly labeled as mock, directly reported by local hooks, or inferred from observable GitHub activity.
 
+## Agent reporting
+
+Open **Reports** in the top toolbar. Select one agent or any combination (up to 50),
+choose an inclusive UTC date range (one day to 366 days), and **Apply filters / refresh**.
+Use **View agent report** in a profile to preselect that agent. Agents remain
+selectable after leaving the office. Switch between combined totals and per-agent
+comparisons, with daily graphs and a table for active working time, AI credits,
+input tokens, and output tokens.
+
+Runtime collection starts with observed local hooks after upgrading; earlier working
+time is **not reconstructed**. Session start alone does not count as work. Prompts,
+tools and other working hooks start/resume recording; turn stop and session end stop it
+immediately, excluding the attention/idle delay. These are hook-reported working
+intervals, not CPU measurements: waits without a corresponding stop hook (such as
+some tool approvals) cannot be separated from work. Missing stop events are capped
+at the configured offline threshold. Server downtime is excluded; after a crash,
+only time through the last persisted refresh heartbeat is retained.
+
+Combined duration is **agent-hours**, not elapsed wall time: overlapping agents add
+together. Credit/token history comes from locally available Copilot CLI and VS Code
+records, matched only by exact session/child identity. Missing metrics show **Not
+recorded**, not zero; partial recorded metrics/group totals are labeled. Runtime
+may cover only part of the first/last day or gaps in server uptime;
+days without any observed hook or working interval show **Not recorded** rather
+than an assumed zero. Source availability,
+runtime tracking start, and unattributed calls appear below each report. History
+retention and unreported usage can make these totals incomplete; they are not a
+billing statement. Cache-token counters are excluded.
+
+After updating an existing installation, run **Repair-Agent-Office.cmd** to apply
+the reporting schema migration and rebuild, then launch it. Repair preserves data.
+
 ## Quick start
 
 **Technical preview:** Windows source installation; Node.js and internet access
