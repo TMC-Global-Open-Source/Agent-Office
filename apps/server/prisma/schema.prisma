@@ -31,6 +31,38 @@ model Agent {
   desk               Desk?
   activities         AgentActivity[]
   avatar             AvatarProfile?
+  runState           AgentRunState?
+  workingIntervals   AgentWorkingInterval[]
+  runtimeDays        AgentRuntimeDay[]
+}
+
+model AgentRunState {
+  agentId        String   @id
+  trackedSince   DateTime
+  lastEventAt    DateTime
+  lastEventKind  String
+  working        Boolean
+  lastObservedAt DateTime
+  intervalId     String?
+  agent          Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model AgentWorkingInterval {
+  id        String   @id
+  agentId   String
+  startedAt DateTime
+  endedAt   DateTime
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, startedAt])
+}
+
+model AgentRuntimeDay {
+  agentId String
+  date    String
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, date])
 }
 
 model AgentActivity {

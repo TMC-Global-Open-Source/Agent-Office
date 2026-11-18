@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSchema } from "@agent-office/shared";
-import { readUsageAttribution } from "../src/usage-attribution.js";
+import { readDailyAttributedUsage, readUsageAttribution } from "../src/usage-attribution.js";
 
 const paths: string[] = [];
 afterEach(() => {
@@ -47,6 +47,47 @@ function fixture() {
   return { path, db };
 }
 describe("exact usage attribution", () => {
+  it("groups CLI calls into UTC days without moving child or unrecognized usage to the root", () => {
+    const { path, db } = fixture();
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, repository TEXT);
+      CREATE TABLE assistant_usage_events (session_id TEXT, agent_id TEXT, parent_tool_call_id TEXT, created_at TEXT, input_tokens INTEGER, output_tokens INTEGER, total_nano_aiu INTEGER);
+      INSERT INTO sessions VALUES ('session', 'org/repo');
+      INSERT INTO assistant_usage_events VALUES
+        ('session', NULL, NULL, '2026-10-13 23:59:59', 10, 2, 1000000000),
+        ('session', NULL, NULL, '2026-10-14T01:00:00+01:00', 0, NULL, NULL),
+        ('session', 'child', 'call', '2026-10-14T00:00:00Z', 30, 5, 250000000),
+        ('session', 'unknown', 'call2', '2026-10-14T12:00:00Z', 999, 999, NULL),
+        ('session', NULL, NULL, '2026-10-15T00:00:00Z', 999, 999, NULL);
+    `);
+    db.close();
+    const root = agent("session"),
+      child = agent("session", "child");
+    const report = readDailyAttributedUsage(
+      [root, child],
+      "2026-10-13T00:00:00Z",
+      "2026-10-14T23:59:59.999Z",
+      path,
+      null,
+    );
+    expect(report.usage.filter((row) => row.agentId === root.id)).toMatchObject([
+      {
+        date: "2026-10-13",
+        inputTokenCalls: 1,
+        outputTokenCalls: 1,
+        counts: { inputTokens: 10, aiCredits: 1 },
+      },
+      {
+        date: "2026-10-14",
+        inputTokenCalls: 1,
+        outputTokenCalls: 0,
+        counts: { inputTokens: 0, outputTokens: null, aiCredits: null },
+      },
+    ]);
+    expect(report.usage.find((row) => row.agentId === child.id)?.counts.inputTokens).toBe(30);
+    expect(report.usage.find((row) => row.agentId === null)?.counts.inputTokens).toBe(999);
+    expect(report.sources[0]?.calls).toBe(4);
+  });
   it("counts each call once per folder and attributes root and child only by exact identities", () => {
     const { path, db } = fixture();
     db.exec(`

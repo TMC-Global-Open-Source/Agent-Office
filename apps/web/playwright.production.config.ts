@@ -18,6 +18,7 @@ export default defineConfig({
       AGENT_PROVIDER: "mock",
       DATABASE_URL: "file:./production-test.db",
       VSCODE_USAGE_TRACKING: "false",
+      COPILOT_USAGE_DB_PATH: fileURLToPath(new URL("./test-results/no-usage.db", import.meta.url)),
       PORT: String(port),
     },
   },

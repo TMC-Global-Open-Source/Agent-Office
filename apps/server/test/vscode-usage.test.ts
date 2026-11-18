@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSchema } from "@agent-office/shared";
 import { parseChatSessionLog, readVsCodeUsage } from "../src/vscode-usage.js";
-import { readUsageAttribution } from "../src/usage-attribution.js";
+import { readDailyAttributedUsage, readUsageAttribution } from "../src/usage-attribution.js";
 import { readUsageHistory } from "../src/usage-history.js";
 
 const roots: string[] = [];
@@ -87,6 +87,35 @@ const sessionLog = jsonl(
 );
 
 describe("VS Code chat session usage", () => {
+  it("reports numeric VS Code usage per UTC day with exact chat-session attribution", () => {
+    const root = userData();
+    workspace(
+      root,
+      "daily",
+      { folder: "file:///C:/Projects/Main" },
+      {
+        "session-1.jsonl": sessionLog,
+        "unknown.jsonl": jsonl({
+          kind: 0,
+          v: { requests: [{ timestamp: at("2026-10-10T10:00:00Z"), copilotCredits: 99 }] },
+        }),
+      },
+    );
+    const agent = vscodeAgent("session-1");
+    const result = readDailyAttributedUsage(
+      [agent],
+      "2026-10-10T00:00:00Z",
+      "2026-10-11T23:59:59.999Z",
+      join(root, "absent.db"),
+      root,
+    );
+    expect(result.usage.filter((row) => row.agentId === agent.id)).toMatchObject([
+      { date: "2026-10-10", counts: { inputTokens: 100, outputTokens: 10, aiCredits: 2 } },
+      { date: "2026-10-11", counts: { inputTokens: 40, outputTokens: 4, aiCredits: 0.5 } },
+    ]);
+    expect(result.usage.find((row) => !row.agentId)?.counts.aiCredits).toBe(99);
+    expect(JSON.stringify(result)).not.toContain("SECRET");
+  });
   it("replays snapshot, push, truncate, and property records keeping only numeric fields", () => {
     const requests = parseChatSessionLog(
       jsonl(

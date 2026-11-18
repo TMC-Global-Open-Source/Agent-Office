@@ -34,6 +34,7 @@ import { creditLabel, tokenTotal } from "./token-counts.js";
 import { officeViews, type OfficeView } from "./office/camera-views.js";
 import { everyoneIdle } from "./office/janitor-animation.js";
 import { filterAgents, statusColors, statusLabels, useOfficeStore } from "./store.js";
+import { AgentReports } from "./AgentReports.js";
 
 const stateFilters: Array<AgentState | "all"> = [
   "all",
@@ -415,7 +416,15 @@ function AgentName({ agent }: { agent: Agent }) {
   return <>{agentDisplayName(agent, showSource)}</>;
 }
 
-export function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+export function AgentDetails({
+  agent,
+  onClose,
+  onReport,
+}: {
+  agent: Agent;
+  onClose: () => void;
+  onReport?: () => void;
+}) {
   const usage = useOfficeStore((state) =>
     state.usage?.agents.find((item) => item.agentId === agent.id),
   );
@@ -506,7 +515,10 @@ export function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => 
       return (
         target instanceof Node &&
         !panelRef.current?.contains(target) &&
-        !(target instanceof Element && target.closest(".fullscreen-button, .scene-controls"))
+        !(
+          target instanceof Element &&
+          target.closest(".fullscreen-button, .scene-controls, .reports-button")
+        )
       );
     };
     const down = (event: PointerEvent) => {
@@ -557,6 +569,11 @@ export function AgentDetails({ agent, onClose }: { agent: Agent; onClose: () => 
         <span className="inference-badge">{agent.statusKind}</span>
       </div>
       <p className="detail-reason">{agent.statusReason ?? "No status explanation is available."}</p>
+      {onReport && (
+        <button className="toolbar-button" onClick={onReport}>
+          <Table2 size={15} /> View agent report
+        </button>
+      )}
       <button
         className="toolbar-button"
         disabled={sendingHome || Boolean(agent.metadata.homeDeparture)}
@@ -910,7 +927,12 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 }
 
 export function App() {
+  const [reportSelection, setReportSelection] = useState<{ agentId?: string } | null>(null);
   const state = useOfficeStore();
+  const openReports = (agentId?: string) => {
+    setReportSelection({ agentId });
+    state.select(null);
+  };
   const reducedMotion = useReducedMotion();
   useEffect(() => {
     void state.refreshUsage();
@@ -1048,6 +1070,14 @@ export function App() {
         </div>
         <div className="topbar-meta">
           <ConnectionStatus connected={state.connected} />
+          <button
+            className="toolbar-button reports-button"
+            title="Agent reports"
+            onClick={() => openReports(selectedAgent?.id)}
+          >
+            <Table2 size={15} />
+            Reports
+          </button>
           {state.stale && <span className="stale-pill">STALE DATA</span>}
           <span className="sync-time">
             {state.lastSync
@@ -1068,6 +1098,12 @@ export function App() {
           </button>
         </div>
       </header>
+      {reportSelection && (
+        <AgentReports
+          initialAgentId={reportSelection.agentId}
+          onClose={() => setReportSelection(null)}
+        />
+      )}
 
       <div className="workspace">
         <section className="office-column">
@@ -1377,6 +1413,7 @@ export function App() {
             key={selectedAgent.id}
             agent={selectedAgent}
             onClose={() => state.select(null)}
+            onReport={() => openReports(selectedAgent.id)}
           />,
           // The browser only shows the fullscreen element, so the profile must render inside it.
           fullscreen && sceneRef.current ? sceneRef.current : document.body,

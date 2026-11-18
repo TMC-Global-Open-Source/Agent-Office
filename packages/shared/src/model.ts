@@ -89,6 +89,31 @@ export interface TokenCounts {
   aiCreditCalls: number;
 }
 
+export interface AgentReportDay extends TokenCounts {
+  agentId: string;
+  date: string;
+  workingMilliseconds: number | null;
+  inputTokenCalls: number;
+  outputTokenCalls: number;
+}
+
+export interface AgentReport {
+  start: string;
+  end: string;
+  timezone: "UTC";
+  asOf: string;
+  agents: Array<{
+    id: string;
+    displayName: string;
+    source: string;
+    runtime: string | null;
+    trackedSince: string | null;
+  }>;
+  days: AgentReportDay[];
+  sources: UsageSourceStatus[];
+  unattributed: TokenCounts;
+}
+
 export type UsageSourceId = "copilot-cli" | "vscode";
 
 export interface UsageSourceStatus extends TokenCounts {

@@ -25,7 +25,7 @@ import {
 const pullRequestEvents = new Set(["postToolUse", "agentStop", "sessionEnd"]);
 const minimumPullRequestGapMs = 15_000;
 
-const LocalHookEventSchema = z.object({
+export const LocalHookEventSchema = z.object({
   event: z.enum([
     "sessionStart",
     "userPromptSubmitted",
