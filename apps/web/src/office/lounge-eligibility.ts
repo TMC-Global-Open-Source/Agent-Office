@@ -3,6 +3,34 @@ import { completionDuration } from "./status-animation.js";
 import { mergePartyActive } from "./party-animation.js";
 import { homeDeparture } from "@agent-office/shared";
 
+export const idleDeskGraceMs = 30_000;
+
+export interface IdleGrace {
+  status: Agent["status"];
+  until: number | null;
+}
+
+export function updateIdleGrace(
+  previous: Map<string, IdleGrace>,
+  agents: Agent[],
+  now: number,
+): Map<string, IdleGrace> {
+  return new Map(
+    agents.map((agent) => {
+      const old = previous.get(agent.id);
+      const until =
+        agent.status !== "idle"
+          ? null
+          : old?.status === "idle"
+            ? old.until
+            : old && old.status !== "offline"
+              ? now + idleDeskGraceMs
+              : null;
+      return [agent.id, { status: agent.status, until }];
+    }),
+  );
+}
+
 export function loungeBayCount(activeAgentCount: number): number {
   return Math.max(1, Math.ceil(activeAgentCount / 8));
 }
@@ -32,9 +60,16 @@ export function completedLoungeAt(agent: Agent): number | null {
   return Number.isFinite(completed) ? completed + completionDuration * 1000 : null;
 }
 
-export function belongsInLounge(agent: Agent, now: number): boolean {
+export function belongsInLounge(
+  agent: Agent,
+  now: number,
+  idleGraceUntil: number | null = null,
+): boolean {
   if (homeDeparture({ metadata: agent.metadata ?? {} }) !== null) return false;
   if (mergePartyActive(agent, now)) return false;
   const deadline = completedLoungeAt(agent);
-  return agent.status === "idle" || (deadline !== null && now >= deadline);
+  return (
+    (agent.status === "idle" && (idleGraceUntil === null || now >= idleGraceUntil)) ||
+    (deadline !== null && now >= deadline)
+  );
 }

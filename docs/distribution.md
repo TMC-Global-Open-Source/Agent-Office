@@ -69,7 +69,7 @@ values, hook commands or settings contents. Paths may identify your Windows user
 or workspace; redact them before sharing publicly.
 
 `Uninstall-Agent-Office.cmd` asks for `UNINSTALL`, stops only a verified owned
-server, and removes only its own desktop shortcut and hook registration.
+server, and removes only its own desktop and autostart shortcuts and hook registration.
 Application files, `.env`, databases, snapshots, logs and other instances' hooks
 are preserved. No automatic user-data deletion option is provided. Remove the app
 folder manually afterwards if desired; retain data until you explicitly decide

@@ -22,7 +22,7 @@ try {
         }
     }
     if ($Action -eq 'Uninstall') {
-        if (-not $ConfirmUninstall -and (Read-Host 'Remove the owned shortcut and hooks, preserving all data? Type UNINSTALL to confirm') -cne 'UNINSTALL') {
+        if (-not $ConfirmUninstall -and (Read-Host 'Remove owned shortcuts, autostart and hooks, preserving all data? Type UNINSTALL to confirm') -cne 'UNINSTALL') {
             throw 'Uninstall cancelled; no data was changed.'
         }
     }
@@ -32,6 +32,8 @@ try {
         'Backup' { & $node $maintenance backup }
         'Restore' { & $node $maintenance restore $Snapshot --confirmed }
         'Uninstall' {
+            . (Join-Path $PSScriptRoot 'Office-Autostart.ps1')
+            Set-OfficeAutostart 'Disable' $root ([Environment]::GetFolderPath('Startup')) -PreserveOther
             # Do not change a shortcut or hook registration now owned by a different installation.
             & $node $maintenance unregister
             if ($LASTEXITCODE -ne 0) { throw 'Could not inspect/remove hook registration.' }
@@ -45,7 +47,7 @@ try {
                     Write-Host 'Desktop shortcut points to another installation; preserved.'
                 }
             }
-            Write-Host 'Uninstalled the owned shortcut and hooks. Application files, settings, databases, backups and logs are preserved.'
+            Write-Host 'Uninstalled the owned shortcut, autostart and hooks. Application files, settings, databases, backups and logs are preserved.'
             Write-Host 'You may remove this application folder manually. No user-data deletion is performed by this command.'
         }
     }

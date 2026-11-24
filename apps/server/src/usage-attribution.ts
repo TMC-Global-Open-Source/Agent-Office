@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { stableAgentId } from "./providers/local-hooks.js";
 import { defaultVsCodeUserDataPath, readVsCodeUsage } from "./vscode-usage.js";
+import { parseUsageTimestamp, reportDate } from "./report-time.js";
+import { readReportEvidence } from "./report-evidence.js";
 import type {
   Agent,
   AgentTokenUsage,
@@ -68,6 +70,7 @@ function readCli(
   since: string,
   asOf: string,
   daily = false,
+  timeZone = "UTC",
 ): { status: UsageSourceStatus; usage: AttributedUsage[] } {
   const status: UsageSourceStatus = {
     ...emptyCounts(),
@@ -105,7 +108,7 @@ function readCli(
       .prepare(
         `
       SELECT u.session_id AS sessionId, u.agent_id AS childId,
-        ${daily ? "date(u.created_at)" : "NULL"} AS date,
+        ${daily ? "u.created_at" : "NULL"} AS date,
         COUNT(u.input_tokens) AS inputTokenCalls, COUNT(u.output_tokens) AS outputTokenCalls,
         u.parent_tool_call_id AS parentCall, NULLIF(TRIM(s.repository), '') AS repository,
         ${cwd ? "s.cwd" : "NULL"} AS cwd,
@@ -114,7 +117,7 @@ function readCli(
         ${credits ? "COUNT(u.total_nano_aiu)" : "0"} AS aiCreditCalls
       FROM assistant_usage_events u LEFT JOIN sessions s ON s.id = u.session_id
       WHERE julianday(u.created_at) >= julianday(?) AND julianday(u.created_at) <= julianday(?)
-      GROUP BY u.session_id, u.agent_id, u.parent_tool_call_id, s.repository${cwd ? ", s.cwd" : ""}${daily ? ", date(u.created_at)" : ""}
+      GROUP BY u.session_id, u.agent_id, u.parent_tool_call_id, s.repository${cwd ? ", s.cwd" : ""}${daily ? ", u.created_at" : ""}
     `,
       )
       .all(since, asOf) as Row[];
@@ -137,7 +140,7 @@ function readCli(
       const { inputTokens, outputTokens, calls, aiCredits, aiCreditCalls } = row;
       addCounts(status, row);
       return {
-        date: row.date,
+        date: row.date === null ? null : reportDate(parseUsageTimestamp(row.date), timeZone),
         inputTokenCalls: row.inputTokenCalls,
         outputTokenCalls: row.outputTokenCalls,
         source: "copilot-cli",
@@ -164,6 +167,7 @@ function readVsCode(
   since: string,
   asOf: string,
   daily = false,
+  timeZone = "UTC",
 ): { status: UsageSourceStatus; usage: AttributedUsage[] } {
   const status: UsageSourceStatus = {
     ...emptyCounts(),
@@ -174,7 +178,7 @@ function readVsCode(
   if (path === null) return { status, usage: [] };
   const result = readVsCodeUsage(new Date(since), new Date(asOf), path);
   status.available = result.available;
-  status.message = result.message;
+  status.message = `${result.message} VS Code tokens are excluded because prompt counts are context-cumulative, not per-call usage.`;
   const known = new Set(
     agents
       .filter(
@@ -188,7 +192,7 @@ function readVsCode(
   const usage = result.sessions.flatMap((session): AttributedUsage[] => {
     const groups = new Map<string | null, typeof session.requests>();
     for (const request of session.requests) {
-      const date = daily ? new Date(request.timestamp).toISOString().slice(0, 10) : null;
+      const date = daily ? reportDate(request.timestamp, timeZone) : null;
       const group = groups.get(date) ?? [];
       group.push(request);
       groups.set(date, group);
@@ -197,8 +201,8 @@ function readVsCode(
       const counts = emptyCounts();
       for (const request of requests) {
         addCounts(counts, {
-          inputTokens: request.inputTokens,
-          outputTokens: request.outputTokens,
+          inputTokens: null,
+          outputTokens: null,
           calls: 1,
           aiCredits: request.aiCredits,
           aiCreditCalls: request.aiCredits === null ? 0 : 1,
@@ -209,8 +213,8 @@ function readVsCode(
       const id = stableAgentId({ runtime: "vscode", sessionId: session.sessionId });
       return {
         date,
-        inputTokenCalls: requests.filter((request) => request.inputTokens !== null).length,
-        outputTokenCalls: requests.filter((request) => request.outputTokens !== null).length,
+        inputTokenCalls: 0,
+        outputTokenCalls: 0,
         source: "vscode",
         sessionId: session.sessionId,
         folder: session.folder,
@@ -229,10 +233,18 @@ export function readDailyAttributedUsage(
   until: string,
   path = join(homedir(), ".copilot", "session-store.db"),
   vscodePath: string | null = defaultVsCodeUserDataPath(),
+  timeZone = "UTC",
 ) {
-  const cli = readCli(agents, path, since, until, true);
-  const vscode = readVsCode(agents, vscodePath, since, until, true);
-  return { sources: [cli.status, vscode.status], usage: [...cli.usage, ...vscode.usage] };
+  const cli = readCli(agents, path, since, until, true, timeZone);
+  const vscode = readVsCode(agents, vscodePath, since, until, true, timeZone);
+  const evidence = readReportEvidence(agents, path, vscodePath, since, until, timeZone);
+  for (const item of evidence.recovered) addCounts(cli.status, item.counts);
+  cli.status.message += ` ${evidence.notes.join(" ")}`;
+  return {
+    sources: [cli.status, vscode.status],
+    usage: [...cli.usage, ...evidence.recovered, ...vscode.usage],
+    estimatedIntervals: evidence.intervals,
+  };
 }
 
 export function readUsageAttribution(
@@ -285,7 +297,7 @@ export function readUsageAttribution(
   return {
     available,
     message: available
-      ? "Last 30 days, grouped by workspace folder (the name above each desk). Copilot CLI usage is matched by exact session/child identity; VS Code usage by exact chat session ID. Unmatched usage is never guessed. Input + output excludes cache-token counters."
+      ? "Last 30 days, grouped by workspace folder (the name above each desk). Copilot CLI usage is matched by exact session/child identity; VS Code usage by exact chat session ID. Unmatched usage is never guessed. Token totals exclude VS Code context-cumulative counts and cache-token counters."
       : "No local Copilot CLI or VS Code usage history was found.",
     since,
     asOf,

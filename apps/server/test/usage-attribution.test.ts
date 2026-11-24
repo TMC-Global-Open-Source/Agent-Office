@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSchema } from "@agent-office/shared";
@@ -47,6 +47,136 @@ function fixture() {
   return { path, db };
 }
 describe("exact usage attribution", () => {
+  it("recovers unmatched log calls once while preserving exact agent identities", () => {
+    const { path, db } = fixture();
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, repository TEXT);
+      CREATE TABLE assistant_usage_events (session_id TEXT, agent_id TEXT, parent_tool_call_id TEXT,
+        created_at TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER, total_nano_aiu INTEGER, duration_ms INTEGER);
+      INSERT INTO sessions VALUES ('session', 'org/repo');
+      INSERT INTO assistant_usage_events VALUES ('session', NULL, NULL, '2026-10-14T12:00:10Z', 'model', 100, 10, 1000000000, 5000);
+    `);
+    db.close();
+    const directory = join(path, "..", "session-state", "session");
+    mkdirSync(directory, { recursive: true });
+    const event = (
+      id: string,
+      time: string,
+      input: number,
+      agentId?: string,
+      parentToolCallId?: string,
+    ) => ({
+      id,
+      timestamp: time,
+      type: "session.usage_record",
+      agentId,
+      data: {
+        usage: {
+          model: "model",
+          inputTokens: input,
+          outputTokens: 10,
+          copilotUsage: { totalNanoAiu: 1_000_000_000 },
+          duration: 5000,
+          parentToolCallId,
+        },
+      },
+    });
+    const matched = event("one", "2026-10-14T12:00:10Z", 100);
+    writeFileSync(
+      join(directory, "events.jsonl"),
+      [
+        matched,
+        matched,
+        event("two", "2026-10-14T12:00:20Z", 50),
+        event("three", "2026-10-14T12:00:30Z", 20, "child", "parent"),
+        event("four", "2026-10-14T12:00:40Z", 10, "unknown"),
+      ]
+        .map((item) => JSON.stringify(item))
+        .join("\n"),
+    );
+    const root = agent("session");
+    const child = agent("session", "child");
+    const result = readDailyAttributedUsage(
+      [root, child],
+      "2026-10-14T00:00:00Z",
+      "2026-10-14T23:59:59Z",
+      path,
+      null,
+    );
+    expect(result.sources[0]).toMatchObject({ calls: 4, inputTokens: 180, aiCredits: 4 });
+    expect(
+      result.usage.filter((row) => row.agentId === root.id).map((row) => row.counts.inputTokens),
+    ).toEqual([100, 50]);
+    expect(result.usage.find((row) => row.agentId === child.id)?.counts.inputTokens).toBe(20);
+    expect(result.usage.find((row) => row.agentId === null)?.counts.inputTokens).toBe(10);
+    expect(
+      result.estimatedIntervals.filter((interval) => interval.agentId === root.id),
+    ).toHaveLength(2);
+    expect(result.sources[0]?.message).toContain("3 additional call(s)");
+  });
+
+  it("excludes ambiguous log matches rather than double-counting", () => {
+    const { path, db } = fixture();
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, repository TEXT);
+      CREATE TABLE assistant_usage_events (session_id TEXT, agent_id TEXT, parent_tool_call_id TEXT,
+        created_at TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER);
+      INSERT INTO sessions VALUES ('session', NULL);
+      INSERT INTO assistant_usage_events VALUES ('session', NULL, NULL, '2026-10-14T12:00:10Z', 'model', 100, 10);
+    `);
+    db.close();
+    const directory = join(path, "..", "session-state", "session");
+    mkdirSync(directory, { recursive: true });
+    const event = (id: string) => ({
+      id,
+      timestamp: "2026-10-14T12:00:10Z",
+      type: "session.usage_record",
+      data: { usage: { model: "model", inputTokens: 100, outputTokens: 10 } },
+    });
+    writeFileSync(
+      join(directory, "events.jsonl"),
+      [event("one"), event("two")].map((item) => JSON.stringify(item)).join("\n"),
+    );
+    const result = readDailyAttributedUsage(
+      [agent("session")],
+      "2026-10-14T00:00:00Z",
+      "2026-10-14T23:59:59Z",
+      path,
+      null,
+    );
+    expect(result.sources[0]?.calls).toBe(1);
+    expect(result.sources[0]?.message).toContain("2 ambiguous");
+  });
+  it("recovers complete records from the tail of an oversized log and reports partial coverage", () => {
+    const { path, db } = fixture();
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, repository TEXT);
+      CREATE TABLE assistant_usage_events (session_id TEXT, agent_id TEXT, parent_tool_call_id TEXT,
+        created_at TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER);
+    `);
+    db.close();
+    const directory = join(path, "..", "session-state", "session");
+    mkdirSync(directory, { recursive: true });
+    const event = {
+      id: "tail",
+      timestamp: "2026-10-14T12:00:10Z",
+      type: "session.usage_record",
+      data: { usage: { model: "model", inputTokens: 50, outputTokens: 10 } },
+    };
+    writeFileSync(
+      join(directory, "events.jsonl"),
+      `${" ".repeat(8 * 1024 * 1024)}\n${JSON.stringify(event)}\n`,
+    );
+    const result = readDailyAttributedUsage(
+      [agent("session")],
+      "2026-10-14T00:00:00Z",
+      "2026-10-14T23:59:59Z",
+      path,
+      null,
+    );
+    expect(result.sources[0]?.calls).toBe(1);
+    expect(result.sources[0]?.message).toContain("partially scanned");
+  });
   it("groups CLI calls into UTC days without moving child or unrecognized usage to the root", () => {
     const { path, db } = fixture();
     db.exec(`
@@ -87,6 +217,27 @@ describe("exact usage attribution", () => {
     expect(report.usage.find((row) => row.agentId === child.id)?.counts.inputTokens).toBe(30);
     expect(report.usage.find((row) => row.agentId === null)?.counts.inputTokens).toBe(999);
     expect(report.sources[0]?.calls).toBe(4);
+  });
+  it("groups usage on the viewer's local calendar date", () => {
+    const { path, db } = fixture();
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, repository TEXT);
+      CREATE TABLE assistant_usage_events (session_id TEXT, agent_id TEXT, parent_tool_call_id TEXT,
+        created_at TEXT, input_tokens INTEGER, output_tokens INTEGER);
+      INSERT INTO sessions VALUES ('session', NULL);
+      INSERT INTO assistant_usage_events VALUES ('session', NULL, NULL, '2026-03-09T03:59:59Z', 7, 2);
+      INSERT INTO assistant_usage_events VALUES ('session', NULL, NULL, '2026-03-09T04:00:00Z', 8, 3);
+    `);
+    db.close();
+    const result = readDailyAttributedUsage(
+      [agent("session")],
+      "2026-03-08T05:00:00Z",
+      "2026-03-10T03:59:59Z",
+      path,
+      null,
+      "America/New_York",
+    );
+    expect(result.usage.map((row) => row.date)).toEqual(["2026-03-08", "2026-03-09"]);
   });
   it("counts each call once per folder and attributes root and child only by exact identities", () => {
     const { path, db } = fixture();

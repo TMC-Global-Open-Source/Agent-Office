@@ -33,7 +33,13 @@ import { loungePersonality } from "./lounge-animation.js";
 import { officeViews, type OfficeView } from "./camera-views.js";
 import { useOfficeStore } from "../store.js";
 import { agentDisplayName } from "../agent-name.js";
-import { assignLoungeSeats, belongsInLounge, loungeBayCount } from "./lounge-eligibility.js";
+import {
+  assignLoungeSeats,
+  belongsInLounge,
+  loungeBayCount,
+  updateIdleGrace,
+  type IdleGrace,
+} from "./lounge-eligibility.js";
 import { partyElapsed, partyStartedAt } from "./party-animation.js";
 import { useSecretParty } from "./secret-party.js";
 import { bossActive, bossDurationMs, bossEligible } from "./boss-mode.js";
@@ -74,11 +80,20 @@ function Scene({
 }) {
   const controls = useRef<OrbitControlsImpl>(null);
   const [loungeNow, setLoungeNow] = useState(Date.now);
+  const idleGrace = useRef(new Map<string, IdleGrace>());
+  const grace = useMemo(() => {
+    idleGrace.current = updateIdleGrace(idleGrace.current, allAgents, Date.now());
+    return idleGrace.current;
+  }, [allAgents]);
   useEffect(() => {
     const update = () => {
       const now = Date.now();
       setLoungeNow((previous) =>
-        allAgents.some((agent) => belongsInLounge(agent, previous) !== belongsInLounge(agent, now))
+        allAgents.some(
+          (agent) =>
+            belongsInLounge(agent, previous, grace.get(agent.id)?.until) !==
+            belongsInLounge(agent, now, grace.get(agent.id)?.until),
+        )
           ? now
           : previous,
       );
@@ -86,7 +101,7 @@ function Scene({
     update();
     const timer = window.setInterval(update, 250);
     return () => window.clearInterval(timer);
-  }, [allAgents]);
+  }, [allAgents, grace]);
   const loungeAssignments = useRef(new Map<string, number>());
   const waterClock = useRef(0);
   const waterState = useRef<WaterBreakState>({ visit: null, nextAt: null, variants: {} });
@@ -141,7 +156,9 @@ function Scene({
   const byDesk = useMemo(() => new Map(layout.desks.map((desk) => [desk.agentId, desk])), [layout]);
   const selectedDesk = selectedId ? byDesk.get(selectedId) : undefined;
   const loungeIndexByAgent = useMemo(() => {
-    const idleAgents = allAgents.filter((agent) => belongsInLounge(agent, loungeNow));
+    const idleAgents = allAgents.filter((agent) =>
+      belongsInLounge(agent, loungeNow, grace.get(agent.id)?.until),
+    );
     idleAgents.sort((a, b) => {
       const aDesk = byDesk.get(a.id);
       const bDesk = byDesk.get(b.id);
@@ -158,7 +175,7 @@ function Scene({
     );
     loungeAssignments.current = assignments;
     return assignments;
-  }, [allAgents, byDesk, loungeNow]);
+  }, [allAgents, byDesk, loungeNow, grace]);
   const selectedLoungeIndex = selectedId ? loungeIndexByAgent.get(selectedId) : undefined;
   const fullIdleSeats = useMemo(
     () =>
@@ -352,6 +369,7 @@ function Scene({
           <AgentPresence
             key={agent.id}
             agent={agent}
+            waitingAtDesk={agent.status === "idle" && (grace.get(agent.id)?.until ?? 0) > loungeNow}
             desk={desk}
             departureFurniture={departureFurniture}
             loungeIndex={loungeIndexByAgent.get(agent.id)}

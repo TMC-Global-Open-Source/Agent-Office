@@ -87,6 +87,36 @@ const sessionLog = jsonl(
 );
 
 describe("VS Code chat session usage", () => {
+  it("reads legacy timing and does not double-count a JSON twin", () => {
+    const root = userData();
+    const stamp = at("2026-10-12T00:00:00Z");
+    workspace(root, "legacy", null, {
+      "legacy.json": JSON.stringify({
+        requests: [{ timestamp: stamp, result: { timings: { totalElapsed: 5000 } } }],
+      }),
+      "twin.json": JSON.stringify({ requests: [{ timestamp: stamp, copilotCredits: 99 }] }),
+      "twin.jsonl": jsonl({
+        kind: 0,
+        v: { requests: [{ timestamp: stamp, elapsedMs: 2000, copilotCredits: 1 }] },
+      }),
+    });
+    const usage = readVsCodeUsage(new Date("2026-10-10T00:00:00Z"), now, root);
+    expect(usage.sessions).toHaveLength(2);
+    expect(
+      usage.sessions.find((session) => session.sessionId === "legacy")?.requests[0]?.durationMs,
+    ).toBe(5000);
+    expect(
+      usage.sessions.find((session) => session.sessionId === "twin")?.requests[0],
+    ).toMatchObject({ durationMs: 2000, aiCredits: 1 });
+    const report = readDailyAttributedUsage(
+      [vscodeAgent("legacy")],
+      "2026-10-10T00:00:00Z",
+      "2026-10-13T23:59:59Z",
+      join(root, "missing.db"),
+      root,
+    );
+    expect(report.estimatedIntervals).toMatchObject([{ start: stamp, end: stamp + 5000 }]);
+  });
   it("reports numeric VS Code usage per UTC day with exact chat-session attribution", () => {
     const root = userData();
     workspace(
@@ -110,8 +140,8 @@ describe("VS Code chat session usage", () => {
       root,
     );
     expect(result.usage.filter((row) => row.agentId === agent.id)).toMatchObject([
-      { date: "2026-10-10", counts: { inputTokens: 100, outputTokens: 10, aiCredits: 2 } },
-      { date: "2026-10-11", counts: { inputTokens: 40, outputTokens: 4, aiCredits: 0.5 } },
+      { date: "2026-10-10", counts: { inputTokens: null, outputTokens: null, aiCredits: 2 } },
+      { date: "2026-10-11", counts: { inputTokens: null, outputTokens: null, aiCredits: 0.5 } },
     ]);
     expect(result.usage.find((row) => !row.agentId)?.counts.aiCredits).toBe(99);
     expect(JSON.stringify(result)).not.toContain("SECRET");
@@ -129,9 +159,19 @@ describe("VS Code chat session usage", () => {
       ),
     );
     expect(requests).toEqual([
-      { timestamp: 5, inputTokens: 8, outputTokens: null, aiCredits: null },
-      { timestamp: 4, inputTokens: null, outputTokens: null, aiCredits: 3 },
+      { timestamp: 5, inputTokens: 8, outputTokens: null, aiCredits: null, durationMs: null },
+      { timestamp: 4, inputTokens: null, outputTokens: null, aiCredits: 3, durationMs: null },
     ]);
+  });
+
+  it("prefers elapsedMs over later updates to result timing", () => {
+    const requests = parseChatSessionLog(
+      jsonl(
+        { kind: 0, v: { requests: [{ timestamp: 1, elapsedMs: 2000 }] } },
+        { kind: 1, k: ["requests", 0, "result", "timings", "totalElapsed"], v: 3000 },
+      ),
+    );
+    expect(requests[0]?.durationMs).toBe(2000);
   });
 
   it("reads workspace folder names, filters the window, and never returns chat content", () => {
@@ -198,8 +238,8 @@ describe("VS Code chat session usage", () => {
         agentId: agent.id,
         folder: "Main",
         repository: null,
-        inputTokens: 140,
-        outputTokens: 14,
+        inputTokens: null,
+        outputTokens: null,
         calls: 2,
         aiCredits: 2.5,
         aiCreditCalls: 2,
@@ -221,7 +261,12 @@ describe("VS Code chat session usage", () => {
     });
 
     const history = readUsageHistory(join(root, "missing.db"), now, root);
-    expect(history).toMatchObject({ available: true, aiCredits: 3.75, calls: 3, inputTokens: 140 });
+    expect(history).toMatchObject({
+      available: true,
+      aiCredits: 3.75,
+      calls: 3,
+      inputTokens: null,
+    });
     expect(history.daily.map((day) => day.date)).toEqual([
       "2026-10-10",
       "2026-10-11",

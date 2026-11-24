@@ -17,27 +17,58 @@ test("built reporting supports filtered groups and loads its theme under the pro
   await expect(page.locator(".roster-item").first()).toBeVisible();
   await page.locator(".roster-item").first().click();
   await expect(page.locator(".detail-panel")).toBeVisible();
-  await page.getByRole("button", { name: "View agent report", exact: true }).click();
+  const reportButton = page.getByRole("button", { name: "View agent report", exact: true });
+  const homeButton = page.getByRole("button", { name: "Send home", exact: true });
+  const reportBounds = await reportButton.boundingBox();
+  const homeBounds = await homeButton.boundingBox();
+  expect(reportBounds).not.toBeNull();
+  expect(homeBounds).not.toBeNull();
+  expect(homeBounds!.x - (reportBounds!.x + reportBounds!.width)).toBeGreaterThanOrEqual(8);
+  await reportButton.click();
   const dialog = page.getByRole("dialog", { name: "Agent reporting" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("checkbox").first()).toBeVisible();
-  await expect(dialog.getByRole("checkbox").first()).toBeChecked();
+  await expect(dialog.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(dialog).toHaveCSS("background-color", "rgb(61, 59, 58)");
-  await dialog.getByRole("checkbox").nth(1).check();
-  await dialog.getByLabel("From (UTC)").fill("2026-11-18");
-  await dialog.getByLabel("Through (UTC)").fill("2026-11-19");
+  await dialog.getByRole("button", { name: "Choose agents" }).click();
+  await dialog.locator(".report-agent-options input:not(:checked)").first().check();
+  await dialog.getByLabel("From").fill("2026-11-18");
+  await dialog.getByLabel("Through").fill("2026-11-19");
   await dialog.getByRole("button", { name: "Apply filters / refresh" }).click();
+  await expect(dialog.getByRole("combobox", { name: "View", exact: true })).toHaveValue(
+    "comparison",
+  );
+  await expect(
+    dialog.getByText("No records for the selected agents in this date range."),
+  ).toBeVisible();
+  await expect(dialog.getByRole("table")).toHaveCount(0);
+  await dialog.getByRole("combobox", { name: "View", exact: true }).selectOption("combined");
   await expect(dialog.getByRole("table").locator("tbody tr")).toHaveCount(2);
   await expect(
-    dialog.getByRole("region", { name: "Daily Active working time chart" }),
+    dialog.getByRole("region", { name: "Daily Estimated historical time chart" }),
   ).toContainText("Not recorded");
   await dialog.getByRole("combobox", { name: "View", exact: true }).selectOption("comparison");
-  await expect(dialog.getByRole("table").locator("tbody tr")).toHaveCount(4);
+  await expect(
+    dialog.getByText("No records for the selected agents in this date range."),
+  ).toBeVisible();
+  await expect(dialog.getByRole("table")).toHaveCount(0);
+  await dialog.getByRole("combobox", { name: "View", exact: true }).selectOption("combined");
   await dialog
     .getByRole("combobox", { name: "Chart metric", exact: true })
     .selectOption("aiCredits");
   await expect(dialog.getByRole("region", { name: "Daily AI credits chart" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Select all agents" }).click();
+  await dialog.getByRole("button", { name: "Apply filters / refresh" }).click();
+  await expect(dialog.getByText(/All \d+ agents/)).toBeVisible();
+  await expect(dialog.getByText(/cannot be attributed to an agent/)).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const timeCard = await dialog
+    .getByRole("button", { name: /Estimated historical time/ })
+    .boundingBox();
+  const creditsCard = await dialog.getByRole("button", { name: /AI credits/ }).boundingBox();
+  expect(timeCard).not.toBeNull();
+  expect(creditsCard).not.toBeNull();
+  expect(creditsCard!.y).toBeGreaterThan(timeCard!.y + timeCard!.height);
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole("button", { name: "Reports", exact: true })).toBeFocused();

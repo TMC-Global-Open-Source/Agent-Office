@@ -8,6 +8,7 @@ interface VsCodeRequest {
   inputTokens: number | null;
   outputTokens: number | null;
   aiCredits: number | null;
+  durationMs: number | null;
 }
 
 export interface VsCodeSessionUsage {
@@ -40,8 +41,11 @@ const fields = {
   promptTokens: "inputTokens",
   completionTokens: "outputTokens",
   copilotCredits: "aiCredits",
+  elapsedMs: "durationMs",
 } as const;
-type Partial = { [K in keyof VsCodeRequest]?: number | null };
+type Partial = { [K in keyof VsCodeRequest]?: number | null } & {
+  timingDuration?: number | null;
+};
 
 function pick(value: unknown): Partial {
   const picked: Partial = {};
@@ -49,6 +53,8 @@ function pick(value: unknown): Partial {
   for (const [source, target] of Object.entries(fields)) {
     if (source in value) picked[target] = finite((value as Record<string, unknown>)[source]);
   }
+  const result = (value as { result?: { timings?: { totalElapsed?: unknown } } }).result;
+  picked.timingDuration = finite(result?.timings?.totalElapsed);
   return picked;
 }
 
@@ -87,6 +93,20 @@ export function parseChatSessionLog(text: string): VsCodeRequest[] {
     if (record.kind !== 1 || typeof index !== "number" || index < 0) continue;
     if (path.length === 2) {
       requests[index] = pick(record.v);
+    } else if (path.length === 3 && path[2] === "result") {
+      const duration = (record.v as { timings?: { totalElapsed?: unknown } } | null)?.timings
+        ?.totalElapsed;
+      requests[index] = { ...requests[index], timingDuration: finite(duration) };
+    } else if (path.length === 4 && path[2] === "result" && path[3] === "timings") {
+      const duration = (record.v as { totalElapsed?: unknown } | null)?.totalElapsed;
+      requests[index] = { ...requests[index], timingDuration: finite(duration) };
+    } else if (
+      path.length === 5 &&
+      path[2] === "result" &&
+      path[3] === "timings" &&
+      path[4] === "totalElapsed"
+    ) {
+      requests[index] = { ...requests[index], timingDuration: finite(record.v) };
     } else if (path.length === 3 && typeof path[2] === "string" && path[2] in fields) {
       const target = fields[path[2] as keyof typeof fields];
       requests[index] = { ...requests[index], [target]: finite(record.v) };
@@ -99,6 +119,7 @@ export function parseChatSessionLog(text: string): VsCodeRequest[] {
       inputTokens: request.inputTokens ?? null,
       outputTokens: request.outputTokens ?? null,
       aiCredits: request.aiCredits ?? null,
+      durationMs: request.durationMs ?? request.timingDuration ?? null,
     }));
 }
 
@@ -128,7 +149,10 @@ function readLog(file: string, sinceMs: number): VsCodeRequest[] | null {
   const cached = cache.get(file);
   if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size)
     return cached.requests;
-  const requests = parseChatSessionLog(readFileSync(file, "utf8"));
+  const text = readFileSync(file, "utf8");
+  const requests = file.endsWith(".json")
+    ? parseChatSessionLog(JSON.stringify({ kind: 0, v: JSON.parse(text) }))
+    : parseChatSessionLog(text);
   cache.set(file, { mtimeMs: stats.mtimeMs, size: stats.size, requests });
   return requests;
 }
@@ -162,8 +186,10 @@ export function readVsCodeUsage(
   const sessions: VsCodeSessionUsage[] = [];
   let unreadable = 0;
   for (const { directory, folder } of directories) {
-    for (const name of readdirSync(directory)) {
-      if (!name.endsWith(".jsonl")) continue;
+    const names = readdirSync(directory);
+    for (const name of names) {
+      if (!name.endsWith(".jsonl") && !name.endsWith(".json")) continue;
+      if (name.endsWith(".json") && names.includes(`${name.slice(0, -5)}.jsonl`)) continue;
       let requests: VsCodeRequest[] | null;
       try {
         requests = readLog(join(directory, name), sinceMs);
@@ -175,14 +201,14 @@ export function readVsCodeUsage(
         (request) => request.timestamp >= sinceMs && request.timestamp <= untilMs,
       );
       if (inWindow.length)
-        sessions.push({ sessionId: name.slice(0, -".jsonl".length), folder, requests: inWindow });
+        sessions.push({ sessionId: name.replace(/\.jsonl?$/, ""), folder, requests: inWindow });
     }
   }
   return {
     available: true,
     message: `VS Code chat requests from local chatSessions logs${
       unreadable ? `; ${unreadable} log(s) could not be read` : ""
-    }. Each VS Code request may include several model calls; legacy .json chat logs carry no credits and are skipped.`,
+    }. Each VS Code request may include several model calls; legacy logs may not record credits.`,
     sessions,
   };
 }

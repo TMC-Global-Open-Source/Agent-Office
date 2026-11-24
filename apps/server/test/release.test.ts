@@ -28,6 +28,9 @@ it("excludes secrets, generated assets, database sidecars and runtime state", ()
     "LICENSE",
     "Install-Agent-Office.cmd",
     "Uninstall-Agent-Office.cmd",
+    "Enable-Autostart-Agent-Office.cmd",
+    "Disable-Autostart-Agent-Office.cmd",
+    "scripts/Start-AgentOfficeAutostart.ps1",
     "scripts/office-paths.mjs",
     "apps/server/prisma/schema.prisma",
   ]) {

@@ -28,6 +28,7 @@ export function AgentAvatar({
   brewingCoffee = false,
   couchAmount,
   couchTransitioning = false,
+  waitingAtDesk = false,
 }: {
   agent: Agent;
   selected: boolean;
@@ -44,6 +45,7 @@ export function AgentAvatar({
   brewingCoffee?: boolean;
   couchAmount?: MutableRefObject<number>;
   couchTransitioning?: boolean;
+  waitingAtDesk?: boolean;
 }) {
   const root = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
@@ -62,20 +64,21 @@ export function AgentAvatar({
     !partying &&
     !couchTransitioning &&
     (agent.status === "working" || bossing || homeDesk);
+  const seatedAtDesk = isWorking || (waitingAtDesk && !walking && !partying && !couchTransitioning);
   const activity = getOfficeActivity(agent);
   const idleVariant = loungeVariant ?? loungePersonality(agent.id).variant;
 
   useFrame(({ clock }) => {
     const elapsed = Math.max(0, (Date.now() - Date.parse(agent.updatedAt)) / 1000);
     const couch = couchPose(couchAmount?.current ?? (isRelaxing ? 1 : 0));
-    const seated = isWorking && !couchTransitioning ? 1 : couch.blend;
+    const seated = seatedAtDesk && !couchTransitioning ? 1 : couch.blend;
     if (root.current && agent.status !== "spawning") {
       root.current.position.x = couchAmount
         ? 0.25 * couch.blend
-        : isWorking || walking || drinkingWater || playing || partying
+        : seatedAtDesk || walking || drinkingWater || playing || partying
           ? 0
           : 0.25;
-      root.current.position.z = isWorking ? 0.15 : 0.15 * couch.blend;
+      root.current.position.z = seatedAtDesk ? 0.15 : 0.15 * couch.blend;
     }
     if (root.current && agent.status === "spawning" && !reducedMotion) {
       const progress = THREE.MathUtils.clamp(elapsed / 1.4, 0, 1);
@@ -249,7 +252,7 @@ export function AgentAvatar({
     <group
       ref={root}
       position={[
-        isWorking || walking || drinkingWater || playing || partying ? 0 : 0.25,
+        seatedAtDesk || walking || drinkingWater || playing || partying ? 0 : 0.25,
         agent.status === "needs_attention" && !partying && !walking ? 0.32 : 0,
         walking || drinkingWater || playing || partying ? 0 : 0.15,
       ]}

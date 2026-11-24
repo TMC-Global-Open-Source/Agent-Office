@@ -4,6 +4,8 @@ import {
   belongsInLounge,
   completedLoungeAt,
   loungeBayCount,
+  updateIdleGrace,
+  idleDeskGraceMs,
 } from "./lounge-eligibility.js";
 import type { Agent } from "@agent-office/shared";
 
@@ -30,6 +32,30 @@ it("reclaims seats in removed bays while preserving stable seats in the remainin
     ["moving", 0],
   ]);
   expect(assignLoungeSeats(previous, ["staying", "moving"], 9).get("moving")).toBe(8);
+});
+
+it("keeps an agent at the desk for 30 seconds after becoming idle and cancels on renewed work", () => {
+  const working = { id: "agent", status: "working", metadata: {} } as Agent;
+  const idle = { ...working, status: "idle" } as Agent;
+  const initial = updateIdleGrace(new Map(), [working], 1000);
+  const paused = updateIdleGrace(initial, [idle], 2000);
+  const until = paused.get("agent")!.until;
+  expect(until).toBe(2000 + idleDeskGraceMs);
+  expect(belongsInLounge(idle, until! - 1, until)).toBe(false);
+  expect(belongsInLounge(idle, until!, until)).toBe(true);
+  expect(updateIdleGrace(paused, [idle], 10000).get("agent")!.until).toBe(until);
+  const resumed = updateIdleGrace(paused, [working], 10000);
+  expect(resumed.get("agent")!.until).toBeNull();
+  expect(updateIdleGrace(resumed, [idle], 11000).get("agent")!.until).toBe(41000);
+  expect(updateIdleGrace(resumed, [], 11000).size).toBe(0);
+});
+
+it("does not hold initially idle or returning offline agents at a desk", () => {
+  const idle = { id: "agent", status: "idle", metadata: {} } as Agent;
+  expect(updateIdleGrace(new Map(), [idle], 1000).get("agent")!.until).toBeNull();
+  const offline = { ...idle, status: "offline" } as Agent;
+  const initial = updateIdleGrace(new Map(), [offline], 1000);
+  expect(updateIdleGrace(initial, [idle], 2000).get("agent")!.until).toBeNull();
 });
 
 it("moves completed sessions to the lounge after celebration without changing status", () => {

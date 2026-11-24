@@ -822,6 +822,14 @@ h1 {
   color: #5d7174;
   margin: 12px 0 7px;
 }
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.detail-actions .toolbar-button {
+  font-size: 11px;
+}
 .confidence-line {
   color: #8a9694;
   font-size: 10px;
