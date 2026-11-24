@@ -569,22 +569,24 @@ export function AgentDetails({
         <span className="inference-badge">{agent.statusKind}</span>
       </div>
       <p className="detail-reason">{agent.statusReason ?? "No status explanation is available."}</p>
-      {onReport && (
-        <button className="toolbar-button" onClick={onReport}>
-          <Table2 size={15} /> View agent report
+      <div className="detail-actions">
+        {onReport && (
+          <button className="toolbar-button" onClick={onReport}>
+            <Table2 size={15} /> View agent report
+          </button>
+        )}
+        <button
+          className="toolbar-button"
+          disabled={sendingHome || Boolean(agent.metadata.homeDeparture)}
+          onClick={() => void sendHome()}
+        >
+          {agent.metadata.homeDeparture
+            ? "Heading home..."
+            : sendingHome
+              ? "Sending home..."
+              : "Send home"}
         </button>
-      )}
-      <button
-        className="toolbar-button"
-        disabled={sendingHome || Boolean(agent.metadata.homeDeparture)}
-        onClick={() => void sendHome()}
-      >
-        {agent.metadata.homeDeparture
-          ? "Heading home..."
-          : sendingHome
-            ? "Sending home..."
-            : "Send home"}
-      </button>
+      </div>
       <p className="detail-reason">
         Clears this agent's desk after it leaves. New work brings it back automatically; its session
         is not stopped.

@@ -88,6 +88,125 @@ html[data-theme="dark"] .agent-reports {
 }
 .report-header {
   justify-content: space-between;
+  margin-bottom: 12px;
+}
+.report-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.report-filters {
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  background: var(--cp-surface);
+  padding: 16px;
+}
+.report-filters h3 {
+  margin-bottom: 8px;
+}
+.report-results {
+  min-width: 0;
+}
+.report-results-heading h3 {
+  margin-bottom: 2px;
+}
+.report-results-heading p {
+  margin-bottom: 8px;
+}
+.report-hint {
+  font-size: 12px;
+}
+.report-date-presets,
+.report-agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+.report-date-filters {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.agent-reports .report-date-filters label,
+.agent-reports .report-agent-search {
+  display: grid;
+  gap: 4px;
+}
+.report-date-filters input,
+.report-agent-search input {
+  width: 100%;
+  min-width: 0;
+}
+.report-apply {
+  width: 100%;
+}
+.agent-reports .report-apply {
+  background: var(--cp-accent);
+  color: var(--cp-accent-fg);
+  border-color: var(--cp-accent);
+  font-weight: 600;
+}
+.agent-reports .report-apply:hover {
+  background: var(--cp-accent-hover);
+}
+.report-selected-agents {
+  display: grid;
+  gap: 6px;
+  max-height: 144px;
+  overflow: auto;
+  margin: 8px 0;
+}
+.agent-reports .report-selected-agent {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  background: var(--cp-accent-soft);
+  border-color: var(--cp-border);
+  font-size: 12px;
+}
+.report-selected-agent span:first-child,
+.report-agent-options span {
+  overflow-wrap: anywhere;
+}
+.report-agent-picker {
+  border-top: 1px solid var(--cp-border);
+  padding-top: 8px;
+}
+.report-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 16px;
+}
+.agent-reports .report-summary-card {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  background: var(--cp-surface);
+  border-color: var(--cp-border);
+  border-radius: 16px;
+  padding: 16px;
+}
+.agent-reports .report-summary-card[aria-pressed="true"] {
+  border-color: var(--cp-accent);
+  background: var(--cp-accent-soft);
+}
+.report-summary-card span {
+  color: var(--cp-text-muted);
+  font-size: 12px;
+}
+.report-summary-card strong {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.report-empty {
+  border: 1px dashed var(--cp-border-strong);
+  border-radius: 16px;
+  padding: 24px;
 }
 .agent-reports h2,
 .agent-reports h3,
@@ -117,7 +236,7 @@ html[data-theme="dark"] .agent-reports {
 }
 .agent-reports button:disabled {
   opacity: 0.6;
-  cursor: wait;
+  cursor: not-allowed;
 }
 .agent-reports input[type="checkbox"] {
   accent-color: var(--cp-accent);
@@ -129,24 +248,33 @@ html[data-theme="dark"] .agent-reports {
   flex-wrap: wrap;
 }
 .report-filters fieldset {
-  margin: 16px 0;
+  min-width: 0;
+  margin: 12px 0;
   border: 1px solid var(--cp-border);
   border-radius: 0.625rem;
-}
-.report-filters fieldset > label {
-  display: inline-flex;
-  margin: 8px 16px 8px 0;
 }
 .report-agent-options {
   display: grid;
   gap: 8px;
-  max-height: 180px;
+  max-height: 240px;
   overflow: auto;
   padding: 8px 0;
+}
+.report-agent-options label {
+  align-items: flex-start;
+  flex-wrap: nowrap;
 }
 .report-note {
   font-size: 13px;
   padding: 16px 0;
+}
+.report-note summary {
+  color: var(--cp-text);
+  cursor: pointer;
+  font-weight: 600;
+}
+.report-note p:first-of-type {
+  margin-top: 12px;
 }
 .agent-reports [role="alert"] {
   color: var(--cp-danger);
@@ -203,12 +331,20 @@ html[data-theme="dark"] .agent-reports {
   padding: 8px;
   border-bottom: 1px solid var(--cp-border);
 }
+@media (max-width: 900px) {
+  .report-workspace {
+    grid-template-columns: 1fr;
+  }
+}
 @media (max-width: 640px) {
   .agent-reports-overlay {
     padding: 8px;
   }
   .agent-reports {
     padding: 16px;
+  }
+  .report-summary {
+    grid-template-columns: 1fr;
   }
   .report-chart-row {
     grid-template-columns: 1fr 1fr;

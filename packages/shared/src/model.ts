@@ -93,6 +93,7 @@ export interface AgentReportDay extends TokenCounts {
   agentId: string;
   date: string;
   workingMilliseconds: number | null;
+  estimatedMilliseconds: number | null;
   inputTokenCalls: number;
   outputTokenCalls: number;
 }
@@ -100,13 +101,14 @@ export interface AgentReportDay extends TokenCounts {
 export interface AgentReport {
   start: string;
   end: string;
-  timezone: "UTC";
+  timezone: string;
   asOf: string;
   agents: Array<{
     id: string;
     displayName: string;
     source: string;
     runtime: string | null;
+    repositories: string[];
     trackedSince: string | null;
   }>;
   days: AgentReportDay[];

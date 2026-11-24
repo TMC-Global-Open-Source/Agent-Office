@@ -8,6 +8,7 @@ import { AgentRuntimeRecorder } from "../src/agent-runtime.js";
 import { buildAgentReport, ReportQuery } from "../src/agent-report.js";
 import { LocalHooksProvider, type LocalHookEvent } from "../src/providers/local-hooks.js";
 import { emptyCounts } from "../src/usage-attribution.js";
+import { nextReportDate, startOfReportDate } from "../src/report-time.js";
 
 const fixtures: Array<{ folder: string; database: PrismaClient }> = [];
 afterEach(async () => {
@@ -55,6 +56,40 @@ function fixture() {
   return { database, recorder, record, agent };
 }
 describe("agent working time and daily reports", () => {
+  it("uses local DST-aware days and merges overlapping historical estimates separately", async () => {
+    const { agent } = fixture();
+    const zone = "America/New_York";
+    expect(
+      startOfReportDate(nextReportDate("2026-03-08"), zone) - startOfReportDate("2026-03-08", zone),
+    ).toBe(23 * 3_600_000);
+    expect(
+      startOfReportDate(nextReportDate("2026-11-01"), zone) - startOfReportDate("2026-11-01", zone),
+    ).toBe(25 * 3_600_000);
+    const start = Date.parse("2026-03-09T03:59:30Z");
+    const report = buildAgentReport(
+      [agent],
+      [],
+      [],
+      ReportQuery.parse({
+        start: "2026-03-08",
+        end: "2026-03-09",
+        agentId: agent.id,
+        timeZone: zone,
+      }),
+      {
+        sources: [],
+        usage: [],
+        estimatedIntervals: [
+          { agentId: agent.id, start, end: start + 60_000 },
+          { agentId: agent.id, start: start + 15_000, end: start + 45_000 },
+        ],
+      },
+      new Date("2026-03-10T00:00:00Z"),
+    );
+    expect(report.timezone).toBe(zone);
+    expect(report.days.map((row) => row.estimatedMilliseconds)).toEqual([30_000, 30_000]);
+    expect(report.days.map((row) => row.workingMilliseconds)).toEqual([null, null]);
+  });
   it("excludes initial prompt waiting and turn-stop attention/idle time, splitting work across UTC midnight", async () => {
     const { database, record, agent } = fixture();
     await record("sessionStart", "2026-11-18T23:58:00Z");
@@ -182,6 +217,76 @@ describe("agent working time and daily reports", () => {
       aiCreditCalls: 1,
     });
     expect(report.unattributed.inputTokens).toBe(999);
+  });
+  it("reports repositories from agent metadata and exactly attributed usage only", () => {
+    const { agent } = fixture();
+    const second = {
+      ...agent,
+      id: "another-agent",
+      repositoryOwner: null,
+      repositoryName: "workspace",
+    };
+    const usage = {
+      date: "2026-11-18",
+      inputTokenCalls: 0,
+      outputTokenCalls: 0,
+      agentId: agent.id,
+      source: "copilot-cli" as const,
+      sessionId: "report",
+      folder: null,
+      repository: "owner/usage",
+      counts: emptyCounts(),
+    };
+    const report = buildAgentReport(
+      [{ ...agent, repositoryOwner: "owner", repositoryName: "metadata" }, second],
+      [],
+      [],
+      ReportQuery.parse({ start: "2026-11-18", end: "2026-11-18", allAgents: "true" }),
+      {
+        sources: [],
+        usage: [
+          usage,
+          { ...usage, repository: "owner/other" },
+          { ...usage, repository: "owner/usage" },
+          { ...usage, agentId: null, repository: "owner/unmatched" },
+        ],
+      },
+    );
+    expect(report.agents[0]?.repositories).toEqual([
+      "owner/metadata",
+      "owner/other",
+      "owner/usage",
+    ]);
+    expect(report.agents[1]?.repositories).toEqual([]);
+  });
+  it("uses the local VS Code workspace as its repository label without changing CLI labels", () => {
+    const provider = new LocalHooksProvider();
+    const event = {
+      sessionId: "workspace-report",
+      workspace: "PickAndBuild",
+      event: "sessionStart" as const,
+      timestamp: "2026-11-18T12:00:00Z",
+    };
+    const vscode = provider.recordEvent({ ...event, runtime: "vscode" });
+    const subagent = provider.recordEvent({
+      ...event,
+      runtime: "vscode",
+      subagentId: "child",
+      subagentType: "reviewer",
+    });
+    const cli = provider.recordEvent({ ...event, runtime: "copilot-cli" });
+    const report = buildAgentReport(
+      [vscode, subagent, cli],
+      [],
+      [],
+      ReportQuery.parse({ start: "2026-11-18", end: "2026-11-18", allAgents: "true" }),
+      { sources: [], usage: [] },
+    );
+    expect(report.agents.map((item) => item.repositories)).toEqual([
+      ["PickAndBuild"],
+      ["PickAndBuild"],
+      [],
+    ]);
   });
   it("rejects invalid calendar dates, reversed/oversized ranges and oversized selections", () => {
     for (const query of [

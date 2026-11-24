@@ -53,6 +53,7 @@ export function AgentPresence({
   loungeVariant,
   labels,
   departureFurniture,
+  waitingAtDesk = false,
 }: {
   agent: Agent;
   desk: DeskData;
@@ -67,6 +68,7 @@ export function AgentPresence({
   loungeVariant?: number;
   labels: boolean;
   departureFurniture: FurnitureBounds[];
+  waitingAtDesk?: boolean;
 }) {
   const root = useRef<THREE.Group>(null);
   const initialized = useRef(false);
@@ -379,6 +381,7 @@ export function AgentPresence({
     >
       <AgentAvatar
         agent={leaving ? { ...agent, status: "idle" } : agent}
+        waitingAtDesk={waitingAtDesk && !leaving && !partying && !bossing}
         selected={selected}
         reducedMotion={reducedMotion}
         relaxing={isRelaxing}

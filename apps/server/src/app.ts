@@ -35,6 +35,7 @@ import { defaultVsCodeUserDataPath } from "./vscode-usage.js";
 import { AgentRuntimeRecorder } from "./agent-runtime.js";
 import { buildAgentReport, ReportQuery } from "./agent-report.js";
 import { readDailyAttributedUsage } from "./usage-attribution.js";
+import { nextReportDate, startOfReportDate } from "./report-time.js";
 
 function vscodeUsagePath(): string | null {
   if (env.VSCODE_USAGE_TRACKING === "false") return null;
@@ -514,17 +515,22 @@ app.get("/api/v1/reports/agents", async (request, response, next) => {
         },
       });
     }
-    const since = `${query.start}T00:00:00.000Z`;
-    const until = new Date(Date.parse(query.end) + 86_400_000 - 1).toISOString();
+    const since = new Date(startOfReportDate(query.start, query.timeZone)).toISOString();
+    const until = new Date(
+      startOfReportDate(nextReportDate(query.end), query.timeZone) - 1,
+    ).toISOString();
     const now = new Date();
     await runtimeRecorder.heartbeat(config.offlineThresholdMinutes, now);
     const states = await prisma.agentRunState.findMany();
     const observedDays = await prisma.agentRuntimeDay.findMany({
-      where: { agentId: { in: query.agentId }, date: { gte: query.start, lte: query.end } },
+      where: {
+        ...(query.allAgents ? {} : { agentId: { in: query.agentId } }),
+        date: { gte: query.start, lte: query.end },
+      },
     });
     const intervals = await prisma.agentWorkingInterval.findMany({
       where: {
-        agentId: { in: query.agentId },
+        ...(query.allAgents ? {} : { agentId: { in: query.agentId } }),
         startedAt: { lt: new Date(Date.parse(until) + 1) },
         endedAt: { gt: new Date(since) },
       },
@@ -535,6 +541,7 @@ app.get("/api/v1/reports/agents", async (request, response, next) => {
       new Date(Math.min(Date.parse(until), now.getTime())).toISOString(),
       env.COPILOT_USAGE_DB_PATH,
       vscodeUsagePath(),
+      query.timeZone,
     );
     return response.json({
       data: buildAgentReport(agents, states, intervals, query, usage, now, observedDays),

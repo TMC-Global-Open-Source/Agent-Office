@@ -128,24 +128,18 @@ export function readUsageHistory(
     aiCreditCalls: 0,
   };
   const daily = new Map(cli.daily.map((day) => [day.date, { ...day }]));
-  let vscodeCallsWithCounts = 0;
   if (vscodePath !== null) {
     const vscode = readVsCodeUsage(new Date(cli.since), now, vscodePath);
     vscodeStatus.available = vscode.available;
-    vscodeStatus.message = vscode.message;
+    vscodeStatus.message = `${vscode.message} VS Code tokens are excluded because prompt counts are context-cumulative, not per-call usage.`;
     const add = (current: number | null, value: number | null) =>
       value === null ? current : (current ?? 0) + value;
     for (const request of vscode.sessions.flatMap((session) => session.requests)) {
       vscodeStatus.calls += 1;
-      vscodeStatus.inputTokens = add(vscodeStatus.inputTokens, request.inputTokens);
-      vscodeStatus.outputTokens = add(vscodeStatus.outputTokens, request.outputTokens);
       vscodeStatus.aiCredits = add(vscodeStatus.aiCredits, request.aiCredits);
       if (request.aiCredits !== null) vscodeStatus.aiCreditCalls += 1;
-      if (request.inputTokens !== null || request.outputTokens !== null) vscodeCallsWithCounts += 1;
       const date = new Date(request.timestamp).toISOString().slice(0, 10);
       const day = daily.get(date) ?? { date, inputTokens: null, outputTokens: null, calls: 0 };
-      day.inputTokens = add(day.inputTokens, request.inputTokens);
-      day.outputTokens = add(day.outputTokens, request.outputTokens);
       day.calls += 1;
       daily.set(date, day);
     }
@@ -160,12 +154,12 @@ export function readUsageHistory(
     ...cli,
     available,
     message: available
-      ? "Recorded local Copilot CLI model calls plus VS Code chat requests; requests without recorded token counts are not included in token totals."
+      ? "Recorded Copilot CLI model calls plus VS Code chat requests. Token totals exclude VS Code context-cumulative counts."
       : "No local Copilot CLI or VS Code usage history was found.",
     inputTokens: sum("inputTokens"),
     outputTokens: sum("outputTokens"),
     calls: cli.calls + vscodeStatus.calls,
-    callsWithTokenCounts: cli.callsWithTokenCounts + vscodeCallsWithCounts,
+    callsWithTokenCounts: cli.callsWithTokenCounts,
     aiCredits: sum("aiCredits"),
     aiCreditCalls: cli.aiCreditCalls + vscodeStatus.aiCreditCalls,
     sources,

@@ -83,10 +83,12 @@ sends the folder.
 
 ## Token usage
 
-The **Reports** toolbar action adds UTC daily graphs and tables for arbitrary agent
+The **Reports** toolbar action adds daily graphs and tables in the browser's time zone for arbitrary agent
 selections. Active working intervals are persisted separately from the visible office
 roster, so dismissed agents retain their reports. Recording begins with local hooks
-after the reporting schema upgrade, not with historical token calls. Session start
+after the reporting schema upgrade. A separate estimate uses measured CLI model durations
+and VS Code turn durations, capped at 20 minutes per event and unioned per agent. It is
+not added to hook time and can omit tool work or other activity. Session start
 does not start the runtime clock; working events do, and turn/session stops end it
 without counting prompt-wait or idle-delay time. Missing stop hooks are bounded by
 the offline timeout. An unsignaled wait (for example a tool approval) cannot be
@@ -94,7 +96,9 @@ distinguished from work. Runtime is checkpointed on refresh and retained only th
 the last checkpoint after a server restart; server downtime is not reconstructed.
 Combined durations sum agent time, including overlap, rather than unioning intervals.
 Reports reuse the exact-identity usage readers described below, independently of
-the cumulative `tokensUsed` value.
+the cumulative `tokensUsed` value. The report also reconciles CLI session usage logs
+against individual database calls, excluding ambiguous matches and identifying incomplete
+scans. These recovered calls are not included in the 30-day overview.
 
 Each agent stores a nullable `tokensUsed` count, shown as **Tokens used** in its profile.
 The dashboard roster and accessible list also show each agent's count; the **Token usage**
@@ -147,13 +151,14 @@ optional: without it, credits are `null` (**Not reported**) and token reporting 
 ## VS Code usage
 
 Both usage endpoints also read VS Code's local chat session logs read-only:
-`<user data>/workspaceStorage/*/chatSessions/*.jsonl` and
-`<user data>/globalStorage/emptyWindowChatSessions/*.jsonl` (no folder). The user-data
+`<user data>/workspaceStorage/*/chatSessions/*.{json,jsonl}` and
+`<user data>/globalStorage/emptyWindowChatSessions/*.{json,jsonl}` (no folder). The user-data
 folder defaults to `%APPDATA%\Code\User` (Windows), `~/Library/Application Support/Code/User`
 (macOS) or `~/.config/Code/User` (Linux); override it with `VSCODE_USER_DATA_PATH`, or set
 `VSCODE_USAGE_TRACKING=false` to disable the source. Each log is an append-only operation
-log that is replayed in memory; only each request's `timestamp`, `promptTokens`,
-`completionTokens`, and `copilotCredits` are retained. Logs older than the window are
+log that is replayed in memory; only request timestamps, token fields, credits, and timing
+metadata are retained. VS Code prompt tokens are cumulative context counts, so VS Code
+token counts are excluded from totals; recorded credits are retained. Logs older than the window are
 skipped by modification time, and parsed results are cached by path/mtime/size.
 
 The log file name is the VS Code chat session ID, which equals the hook `sessionId`, so a

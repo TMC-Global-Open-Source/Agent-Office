@@ -4,15 +4,27 @@ A locally hosted monitoring dashboard for GitHub Copilot agents. The office is a
 
 ## Agent reporting
 
-Open **Reports** in the top toolbar. Select one agent or any combination (up to 50),
-choose an inclusive UTC date range (one day to 366 days), and **Apply filters / refresh**.
-Use **View agent report** in a profile to preselect that agent. Agents remain
-selectable after leaving the office. Switch between combined totals and per-agent
-comparisons, with daily graphs and a table for active working time, AI credits,
-input tokens, and output tokens.
+Open **Reports** in the top toolbar, or **View agent report** in a profile to
+preselect that agent. Search and select one agent or a group (up to 50), or choose
+**Select all agents** to include every recorded agent without that limit. Agents
+remain selectable after leaving the office. Choose an inclusive date range in your
+browser's time zone (one day to 366 days), then **Apply filters / refresh**.
+The Today, Last 7 days, and Last 30 days shortcuts apply the current selection
+immediately. Click the estimated historical time or AI credits total to graph it,
+or choose another metric and switch between the default per-agent view and combined
+totals. The comparison shows repositories from agent metadata or exactly matched
+usage in the selected range. For local VS Code agents, it also shows the workspace
+name as the repository label; that name may not be a Git repository. Unavailable
+repositories are marked **Not reported**. Daily
+details and expandable coverage information appear below the graph. Even when all
+agents are selected, usage that cannot be attributed to an agent is excluded.
+The per-agent comparison omits agent-days without any recorded activity or usage;
+recorded zeroes are still shown.
 
-Runtime collection starts with observed local hooks after upgrading; earlier working
-time is **not reconstructed**. Session start alone does not count as work. Prompts,
+Runtime collection starts with observed local hooks after upgrading. A separate historical
+estimate sums measured CLI model durations and VS Code turn durations (up to 20 minutes
+each), removing overlap for each agent. It may omit tool work and other activity and must
+not be added to hook-recorded time. Session start alone does not count as work. Prompts,
 tools and other working hooks start/resume recording; turn stop and session end stop it
 immediately, excluding the attention/idle delay. These are hook-reported working
 intervals, not CPU measurements: waits without a corresponding stop hook (such as
@@ -29,7 +41,10 @@ days without any observed hook or working interval show **Not recorded** rather
 than an assumed zero. Source availability,
 runtime tracking start, and unattributed calls appear below each report. History
 retention and unreported usage can make these totals incomplete; they are not a
-billing statement. Cache-token counters are excluded.
+billing statement. Cache-token counters and VS Code context-cumulative token counts are
+excluded. The report conservatively reconciles CLI session logs against database calls;
+ambiguous or skipped records are disclosed. Recovered log calls are not included in the
+separate 30-day usage overview.
 
 After updating an existing installation, run **Repair-Agent-Office.cmd** to apply
 the reporting schema migration and rebuild, then launch it. Repair preserves data.
@@ -62,6 +77,20 @@ Logs are in `.agent-office\server.log` and `.agent-office\server-error.log`.
 For console debugging, run `.\Launch-Agent-Office.cmd -Foreground` and keep that window open.
 By default the built dashboard and API share **http://127.0.0.1:4000**.
 An already-running office is reused rather than starting a duplicate.
+
+### Start automatically when you sign in
+
+After setup, run `Enable-Autostart-Agent-Office.cmd` to start the server in the
+background when **your Windows user signs in**. It does not start before sign-in
+or open a browser; use the desktop shortcut to view the dashboard. No administrator
+rights are required. Run `Disable-Autostart-Agent-Office.cmd` to remove this
+installation's startup shortcut; it does not stop a server already running.
+Autostart failures are recorded in `.agent-office\autostart.log`, with server errors
+in `.agent-office\server-error.log`.
+
+The startup shortcut points to this application folder. Before moving it, disable
+autostart, then run repair and enable autostart again in the new location. A shortcut
+owned by another installation or modified by the user is never overwritten or removed.
 
 ### View the office from other computers
 
@@ -97,10 +126,10 @@ automatically. This is a local source-folder installation, not a standalone `.ex
 
 ### Move or repair an installation
 
-1. Run `Stop-Agent-Office.cmd` **before** moving the old folder. Close any foreground/dev server.
+1. If autostart is enabled, run `Disable-Autostart-Agent-Office.cmd`. Run `Stop-Agent-Office.cmd` **before** moving the old folder. Close any foreground/dev server.
 2. Move the entire application folder, then double-click **`Repair-Agent-Office.cmd`**
    in its new location.
-3. After repair reports success, use the refreshed desktop shortcut or `Launch-Agent-Office.cmd`.
+3. After repair reports success, use the refreshed desktop shortcut or `Launch-Agent-Office.cmd`. Re-enable autostart if desired.
 
 Repair reinstalls dependencies, migrates the database schema without resetting data,
 rebuilds, refreshes the runtime and shortcut, reconnects hooks when local-agent mode
@@ -277,7 +306,7 @@ are stored separately in the browser's local storage.
 | `npm run lint` / `npm run typecheck`                   | Static checks                                                                                         |
 | `npm run test` / `npm run test:e2e`                    | Unit/integration and Playwright checks (install Chromium once with `npx playwright install chromium`) |
 | `npm run test:production`                              | Build and check rendering under production security headers using an isolated mock database           |
-| `npm run test:install`                                 | Build and check migration/repair; Windows also starts isolated temporary production servers            |
+| `npm run test:install`                                 | Build and check migration/repair; Windows also starts isolated temporary production servers           |
 | `npm run format`                                       | Format supported source                                                                               |
 | `npm run db:migrate` / `npm run db:seed`               | Set up and seed local SQLite                                                                          |
 | `npm run db:reset`                                     | Reset local development data                                                                          |

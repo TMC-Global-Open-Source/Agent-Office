@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
 import { app, isLoopbackAddress, prisma, provider, syncAgents } from "../src/app.js";
 import * as usageAttribution from "../src/usage-attribution.js";
+import { emptyCounts } from "../src/usage-attribution.js";
 
 describe("Agent Office API", () => {
   beforeEach(async () => {
@@ -70,7 +71,7 @@ describe("Agent Office API", () => {
   it("serves reports directly, includes historical agents, and rejects invalid filters", async () => {
     const reader = vi
       .spyOn(usageAttribution, "readDailyAttributedUsage")
-      .mockReturnValue({ sources: [], usage: [] });
+      .mockReturnValue({ sources: [], usage: [], estimatedIntervals: [] });
     try {
       await syncAgents();
       const agent = await prisma.agent.findFirstOrThrow();
@@ -78,6 +79,7 @@ describe("Agent Office API", () => {
         where: { id: agent.id },
         data: { metadata: JSON.stringify({ archivedAt: new Date().toISOString() }) },
       });
+
       const response = await request(app)
         .get("/api/v1/reports/agents")
         .query({ start: "2026-11-18", end: "2026-11-18", agentId: agent.id })
@@ -95,7 +97,81 @@ describe("Agent Office API", () => {
         .expect(400);
       await request(app)
         .get("/api/v1/reports/agents")
+        .query({ start: "2026-11-18", end: "2026-11-18", timeZone: "Invalid/Zone" })
+        .expect(400);
+      await request(app)
+        .get("/api/v1/reports/agents")
         .query({ start: "2026-11-18", end: "2026-11-18", agentId: "unknown" })
+        .expect(400);
+    } finally {
+      reader.mockRestore();
+    }
+  });
+
+  it("reports all agents beyond the individual selection limit", async () => {
+    const ids = Array.from({ length: 55 }, (_, i) => `report-all-${i}`);
+    const lastId = ids[54]!;
+    const reader = vi.spyOn(usageAttribution, "readDailyAttributedUsage").mockReturnValue({
+      sources: [],
+      usage: [
+        {
+          agentId: lastId,
+          date: "2026-01-03",
+          source: "copilot-cli",
+          sessionId: "test",
+          folder: null,
+          repository: null,
+          inputTokenCalls: 1,
+          outputTokenCalls: 0,
+          counts: { ...emptyCounts(), aiCredits: 2, aiCreditCalls: 1, inputTokens: 10, calls: 1 },
+        },
+      ],
+      estimatedIntervals: [
+        {
+          agentId: lastId,
+          start: Date.parse("2026-01-03T12:00:00Z"),
+          end: Date.parse("2026-01-03T12:01:00Z"),
+        },
+      ],
+    });
+    try {
+      await prisma.agent.createMany({
+        data: ids.map((id) => ({ id, displayName: id, source: "local", status: "idle" })),
+      });
+      await prisma.agentRuntimeDay.create({ data: { agentId: lastId, date: "2026-01-03" } });
+      await prisma.agentWorkingInterval.create({
+        data: {
+          id: "report-all-interval",
+          agentId: lastId,
+          startedAt: new Date("2026-01-03T12:00:00Z"),
+          endedAt: new Date("2026-01-03T12:00:30Z"),
+        },
+      });
+      const range = { start: "2026-01-03", end: "2026-01-04" };
+      const response = await request(app)
+        .get("/api/v1/reports/agents")
+        .query({ ...range, allAgents: "true" })
+        .expect(200);
+      expect(response.body.data.days).toHaveLength(110);
+      expect(response.body.data.days).toContainEqual(
+        expect.objectContaining({
+          agentId: lastId,
+          date: "2026-01-03",
+          workingMilliseconds: 30_000,
+          estimatedMilliseconds: 60_000,
+          aiCredits: 2,
+          inputTokens: 10,
+        }),
+      );
+      const empty = await request(app).get("/api/v1/reports/agents").query(range).expect(200);
+      expect(empty.body.data.days).toEqual([]);
+      await request(app)
+        .get("/api/v1/reports/agents")
+        .query({ ...range, allAgents: "true", agentId: lastId })
+        .expect(400);
+      await request(app)
+        .get("/api/v1/reports/agents")
+        .query({ ...range, agentId: ids })
         .expect(400);
     } finally {
       reader.mockRestore();
